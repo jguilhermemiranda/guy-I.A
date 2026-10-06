@@ -81,7 +81,7 @@ GUY_USERNAME=seu_nome
 
 Há duas formas de trabalhar com a base local:
 
-- Pela interface: clique em `Adicionar arquivo à base`, selecione o arquivo e ele é indexado imediatamente no banco vetorial.
+- Pela interface: clique em `Base de conhecimento` para adicionar arquivos PDF, TXT ou MD, consultar o que já está salvo e remover documentos da base. Os arquivos adicionados são indexados imediatamente no banco vetorial.
 - Pela pasta: os documentos podem ficar em `data/knowledge/` e são armazenados localmente para uso do sistema. O código do projeto também inclui a lógica de sincronização/indexação desses arquivos, mas o fluxo principal do app é adicionar arquivos pela interface.
 
 Arquivos suportados:

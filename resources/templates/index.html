@@ -14,9 +14,8 @@
             <p class="sidebar-section">CONVERSA ATUAL</p>
             <div class="conversations"><div class="conversation active"><span>💬</span><span id="conversation-title">Nova conversa</span></div></div>
             <div class="sidebar-bottom">
-                <button class="sidebar-button" id="add-knowledge" type="button">📚 Adicionar arquivo à base</button>
+                <button class="sidebar-button" id="add-knowledge" type="button">📚 Base de conhecimento</button>
                 <input id="knowledge-file" type="file" accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown" hidden>
-                <p class="knowledge-status" id="knowledge-status" role="status" aria-live="polite"></p>
                 <button class="sidebar-button" type="button" onclick="window.location.href='/memorias'">🧠 Memórias</button>
             </div>
         </aside>
@@ -51,6 +50,21 @@
                 <p class="disclaimer">Guy e Fearth podem cometer erros. Confira informações importantes.</p>
             </div>
         </main>
+    </div>
+    <div class="modal hidden" id="knowledge-dialog" role="dialog" aria-modal="true" aria-labelledby="knowledge-title">
+        <div class="modal-overlay" data-close-knowledge></div>
+        <section class="modal-box knowledge-modal">
+            <header class="modal-header">
+                <div>
+                    <h2 id="knowledge-title">Base de conhecimento</h2>
+                    <p>Adicione ou remova arquivos usados pelo Guy.</p>
+                </div>
+                <button class="modal-close" id="knowledge-close" type="button" aria-label="Fechar">×</button>
+            </header>
+            <button class="button-primary knowledge-add-button" id="knowledge-add-file" type="button">＋ Adicionar arquivo</button>
+            <p class="knowledge-status" id="knowledge-status" role="status" aria-live="polite"></p>
+            <div class="knowledge-files" id="knowledge-files" aria-live="polite"></div>
+        </section>
     </div>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>

@@ -3,8 +3,12 @@ const input = document.querySelector('#message');
 const send = document.querySelector('#send');
 const newChat = document.querySelector('#new-chat');
 const addKnowledge = document.querySelector('#add-knowledge');
+const knowledgeDialog = document.querySelector('#knowledge-dialog');
+const knowledgeAddFile = document.querySelector('#knowledge-add-file');
+const knowledgeClose = document.querySelector('#knowledge-close');
 const knowledgeFile = document.querySelector('#knowledge-file');
 const knowledgeStatus = document.querySelector('#knowledge-status');
+const knowledgeFiles = document.querySelector('#knowledge-files');
 const selector = document.querySelector('#agent-selector');
 const selectorButton = document.querySelector('#agent-selector-button');
 const menu = document.querySelector('#agent-menu');
@@ -63,6 +67,81 @@ function addDebate(data) {
 function setLoading(loading) { send.disabled = loading; input.disabled = loading; selectorButton.disabled = loading; }
 function autoGrow() { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 170)}px`; }
 
+function setKnowledgeStatus(message, error = false) {
+  knowledgeStatus.textContent = message;
+  knowledgeStatus.classList.toggle('error', error);
+}
+
+async function loadKnowledgeFiles() {
+  knowledgeFiles.replaceChildren();
+  const loading = document.createElement('p');
+  loading.className = 'knowledge-empty';
+  loading.textContent = 'Carregando arquivos...';
+  knowledgeFiles.append(loading);
+
+  try {
+    const response = await fetch('/api/conhecimento/arquivos');
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.detail || 'Não foi possível carregar os arquivos.');
+    if (!Array.isArray(data.arquivos)) throw new Error('A resposta da base de conhecimento é inválida.');
+
+    knowledgeFiles.replaceChildren();
+    if (!data.arquivos.length) {
+      const empty = document.createElement('p');
+      empty.className = 'knowledge-empty';
+      empty.textContent = 'Nenhum arquivo na base ainda.';
+      knowledgeFiles.append(empty);
+      return;
+    }
+
+    data.arquivos.forEach(file => {
+      const row = document.createElement('div');
+      row.className = 'knowledge-file-row';
+
+      const details = document.createElement('div');
+      details.className = 'knowledge-file-details';
+      const name = document.createElement('strong');
+      name.textContent = file.nome;
+      const path = document.createElement('small');
+      path.textContent = file.caminho;
+      details.append(name, path);
+
+      const remove = document.createElement('button');
+      remove.className = 'knowledge-remove-button';
+      remove.type = 'button';
+      remove.textContent = 'Remover';
+      remove.setAttribute('aria-label', `Remover ${file.nome} da base`);
+      remove.addEventListener('click', () => removeKnowledgeFile(file, remove));
+
+      row.append(details, remove);
+      knowledgeFiles.append(row);
+    });
+  } catch (error) {
+    knowledgeFiles.replaceChildren();
+    setKnowledgeStatus(error.message, true);
+  }
+}
+
+async function removeKnowledgeFile(file, button) {
+  if (!window.confirm(`Remover "${file.nome}" da base de conhecimento?`)) return;
+  button.disabled = true;
+
+  try {
+    const response = await fetch('/api/conhecimento/arquivos', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ caminho: file.caminho })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.detail || 'Não foi possível remover o arquivo.');
+    setKnowledgeStatus(`${data.arquivo} removido da base.`);
+    await loadKnowledgeFiles();
+  } catch (error) {
+    setKnowledgeStatus(error.message, true);
+    button.disabled = false;
+  }
+}
+
 async function sendMessage() {
   const text = input.value.trim();
   if (!text || send.disabled) return;
@@ -86,14 +165,23 @@ send.addEventListener('click', sendMessage);
 input.addEventListener('input', autoGrow);
 input.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendMessage(); } });
 newChat?.addEventListener('click', async () => { if (send.disabled) return; newChat.disabled = true; try { const response = await fetch('/nova-conversa', { method: 'POST', headers: { 'Content-Type': 'application/json' } }); if (!response.ok) throw new Error('Não foi possível iniciar uma nova conversa.'); showWelcome(); if (title) title.textContent = 'Nova conversa'; } catch (error) { addMessage(`Erro: ${error.message}`, 'assistant'); } finally { newChat.disabled = false; input.focus(); } });
-addKnowledge?.addEventListener('click', () => knowledgeFile?.click());
+addKnowledge?.addEventListener('click', () => {
+  knowledgeDialog.classList.remove('hidden');
+  setKnowledgeStatus('');
+  loadKnowledgeFiles();
+});
+knowledgeAddFile?.addEventListener('click', () => knowledgeFile?.click());
+knowledgeClose?.addEventListener('click', () => knowledgeDialog.classList.add('hidden'));
+knowledgeDialog?.querySelector('[data-close-knowledge]')?.addEventListener('click', () => knowledgeDialog.classList.add('hidden'));
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') knowledgeDialog.classList.add('hidden');
+});
 knowledgeFile?.addEventListener('change', async () => {
   const file = knowledgeFile.files?.[0];
   if (!file) return;
 
-  addKnowledge.disabled = true;
-  knowledgeStatus.textContent = `Adicionando ${file.name}...`;
-  knowledgeStatus.classList.remove('error');
+  knowledgeAddFile.disabled = true;
+  setKnowledgeStatus(`Adicionando ${file.name}...`);
 
   try {
     const formData = new FormData();
@@ -101,13 +189,13 @@ knowledgeFile?.addEventListener('change', async () => {
     const response = await fetch('/api/conhecimento/arquivos', { method: 'POST', body: formData });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.detail || 'Não foi possível adicionar o arquivo.');
-    knowledgeStatus.textContent = `${data.arquivo} adicionado à base (${data.trechos_indexados} trechos).`;
+    setKnowledgeStatus(`${data.arquivo} adicionado à base (${data.trechos_indexados} trechos).`);
+    await loadKnowledgeFiles();
   } catch (error) {
-    knowledgeStatus.textContent = error.message;
-    knowledgeStatus.classList.add('error');
+    setKnowledgeStatus(error.message, true);
   } finally {
     knowledgeFile.value = '';
-    addKnowledge.disabled = false;
+    knowledgeAddFile.disabled = false;
   }
 });
 updateAgentInterface(); input.focus();

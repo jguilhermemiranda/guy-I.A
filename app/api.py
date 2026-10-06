@@ -216,6 +216,53 @@ def api_adicionar_arquivo_conhecimento():
     }), 201
 
 
+@app.route("/api/conhecimento/arquivos", methods=["GET"])
+def api_listar_arquivos_conhecimento():
+    if not BANCO_DIR.exists():
+        return jsonify({"arquivos": []})
+
+    arquivos = []
+    for caminho in sorted(BANCO_DIR.rglob("*")):
+        if caminho.is_file() and caminho.suffix.lower() in {".pdf", ".txt", ".md"}:
+            arquivos.append({
+                "caminho": caminho.relative_to(BANCO_DIR).as_posix(),
+                "nome": caminho.name,
+                "tamanho": caminho.stat().st_size,
+            })
+    return jsonify({"arquivos": arquivos})
+
+
+@app.route("/api/conhecimento/arquivos", methods=["DELETE"])
+def api_remover_arquivo_conhecimento():
+    dados = request.get_json(silent=True)
+    if not isinstance(dados, dict):
+        return jsonify({"detail": "JSON inválido."}), 400
+
+    caminho_relativo = str(dados.get("caminho", "")).strip()
+    if not caminho_relativo:
+        return jsonify({"detail": "Selecione um arquivo para remover."}), 400
+
+    try:
+        raiz = BANCO_DIR.resolve()
+        caminho = (raiz / Path(caminho_relativo)).resolve()
+        caminho.relative_to(raiz)
+    except (OSError, RuntimeError, ValueError):
+        return jsonify({"detail": "Caminho de arquivo inválido."}), 400
+
+    if caminho.suffix.lower() not in {".pdf", ".txt", ".md"} or not caminho.is_file():
+        return jsonify({"detail": "Arquivo não encontrado na base de conhecimento."}), 404
+
+    try:
+        colecao = obter_colecao()
+        remover_documento(colecao, caminho)
+        caminho.unlink()
+    except Exception as erro:
+        app.logger.exception("Erro ao remover arquivo de conhecimento: %s", erro)
+        return jsonify({"detail": "Não foi possível remover o arquivo da base de conhecimento."}), 500
+
+    return jsonify({"sucesso": True, "arquivo": caminho.name})
+
+
 @app.route("/memorias")
 def memorias():
     return render_template("memorias.html")

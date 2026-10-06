@@ -616,6 +616,82 @@ button:disabled {
     color: var(--danger);
 }
 
+.knowledge-modal {
+    max-height: min(80vh, 720px);
+    display: flex;
+    flex-direction: column;
+}
+
+.knowledge-add-button {
+    align-self: flex-start;
+    margin-bottom: 12px;
+}
+
+.knowledge-files {
+    min-height: 80px;
+    max-height: 45vh;
+    overflow-y: auto;
+    border-top: 1px solid var(--border);
+}
+
+.knowledge-empty {
+    color: var(--text-faint);
+    font-size: 13px;
+    padding: 18px 4px;
+}
+
+.knowledge-file-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 4px;
+    border-bottom: 1px solid var(--border);
+}
+
+.knowledge-file-details {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.knowledge-file-details strong,
+.knowledge-file-details small {
+    overflow-wrap: anywhere;
+}
+
+.knowledge-file-details strong {
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.knowledge-file-details small {
+    color: var(--text-faint);
+    font-size: 11px;
+}
+
+.knowledge-remove-button {
+    flex: 0 0 auto;
+    border: 1px solid var(--danger-border);
+    border-radius: var(--radius-sm);
+    background: var(--danger-bg);
+    color: var(--danger);
+    padding: 7px 10px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.knowledge-remove-button:hover {
+    background: rgba(255, 107, 122, 0.16);
+}
+
+.knowledge-remove-button:disabled,
+.knowledge-add-button:disabled {
+    cursor: wait;
+    opacity: 0.6;
+}
+
 
 /* ============================================
    CHAT
