@@ -38,6 +38,7 @@ htmlcov/
 *.sqlite3
 *.sqlite3-*
 data/chroma_db/
+/data/voz/
 
 # Large legacy documents and generated index data are kept locally, not in Git.
 /archive/legacy/guy-copy/chroma_db/
@@ -54,3 +55,5 @@ data/chroma_db/
 *.gguf.*
 Modelfile
 Modelfile.*
+models/vosk-model-small-pt-0.3/
+models/faster-whisper-base/

@@ -15,14 +15,20 @@ const menu = document.querySelector('#agent-menu');
 const title = document.querySelector('#conversation-title');
 const temperatureSlider = document.querySelector('#temperature-slider');
 const temperatureValue = document.querySelector('#temperature-value');
+const voiceInput = document.querySelector('#voice-input');
+const voiceStatus = document.querySelector('#voice-status');
 const DEFAULT_TEMPERATURE = 0.2;
 
 const agents = {
   guy: { name: 'Guy', description: 'Agente principal', avatar: '/static/img/guy.png', heading: 'Fala, Guy aqui. 👋', text: 'Manda a pergunta, projeto ou problema.<br>Vamos descobrir juntos.', css: 'guy' },
-  fearth: { name: 'Fearth', description: 'Agente independente', avatar: '/static/img/fearth.png', heading: 'Fearth aqui. 🪶', text: 'Pode mandar. Vou analisar, questionar<br>e dar minha própria opinião.', css: 'fearth' },
+  fearth: { name: 'Fearth', description: 'Agente independente', avatar: '/static/img/guy%20(2).png', heading: 'Fearth aqui. 🪶', text: 'Pode mandar. Vou analisar, questionar<br>e dar minha própria opinião.', css: 'fearth' },
   debate: { name: 'Debate', description: 'Guy × Fearth', avatar: null, heading: 'Guy × Fearth. ⚔️', text: 'Mande um tema. Os dois vão argumentar,<br>confrontar os pontos e chegar a uma conclusão.', css: 'debate' }
 };
 let currentAgent = localStorage.getItem('guy_agente') || 'guy';
+let voicePreferences = { falar_respostas: false, voz: '', idioma: 'pt-BR' };
+let recorder = null;
+let recordedChunks = [];
+let microphoneStream = null;
 if (!agents[currentAgent]) currentAgent = 'guy';
 
 function getTemperatureValue() {
@@ -46,6 +52,140 @@ if (temperatureSlider) {
 }
 
 function scrollToBottom() { messages.scrollTop = messages.scrollHeight; }
+function setVoiceStatus(message, error = false) { if (!voiceStatus) return; voiceStatus.textContent = message; voiceStatus.classList.toggle('error', error); }
+
+function speak(text) {
+  if (!voicePreferences.falar_respostas || !text) return;
+  if (!voicePreferences.usar_voz_personalizada && !('speechSynthesis' in window)) return;
+  window.speechSynthesis?.cancel();
+  const textoFalado = text
+    .replace(/```[\s\S]*?```/g, ' Trecho de código omitido. ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/^\s{0,3}#{1,6}\s*/gm, '')
+    .replace(/^\s*(?:[-*+]|\d+[.)])\s+/gm, '')
+    .replace(/[*_~]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!textoFalado) return;
+  if (voicePreferences.usar_voz_personalizada) {
+    void falarComVozPersonalizada(textoFalado);
+    return;
+  }
+  const utterance = new SpeechSynthesisUtterance(textoFalado);
+  utterance.lang = voicePreferences.idioma || 'pt-BR';
+  utterance.rate = 1;
+  utterance.pitch = 1;
+  const selected = speechSynthesis.getVoices().find(item => item.name === voicePreferences.voz);
+  if (selected) utterance.voice = selected;
+  window.speechSynthesis.speak(utterance);
+}
+
+let audioPersonalizado = null;
+let urlAudioPersonalizado = '';
+let geracaoAudioPersonalizado = 0;
+
+async function falarComVozPersonalizada(texto) {
+  const geracao = ++geracaoAudioPersonalizado;
+  audioPersonalizado?.pause();
+  if (urlAudioPersonalizado) URL.revokeObjectURL(urlAudioPersonalizado);
+  urlAudioPersonalizado = '';
+  let urlAudio = '';
+  try {
+    setVoiceStatus('Preparando voz local; na primeira vez, o G.U.Y. instala o componente e baixa o modelo. Isso pode levar alguns minutos…');
+    const response = await fetch('/api/voz/sintetizar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ texto, idioma: voicePreferences.idioma || 'pt-BR' })
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.detail || 'Não foi possível gerar a fala personalizada.');
+    }
+    urlAudio = URL.createObjectURL(await response.blob());
+    if (geracao !== geracaoAudioPersonalizado) {
+      URL.revokeObjectURL(urlAudio);
+      return;
+    }
+    urlAudioPersonalizado = urlAudio;
+    audioPersonalizado = new Audio(urlAudio);
+    audioPersonalizado.onended = () => {
+      URL.revokeObjectURL(urlAudio);
+      if (urlAudioPersonalizado === urlAudio) {
+        urlAudioPersonalizado = '';
+        setVoiceStatus('');
+      }
+    };
+    audioPersonalizado.onerror = () => {
+      URL.revokeObjectURL(urlAudio);
+      if (urlAudioPersonalizado === urlAudio) {
+        urlAudioPersonalizado = '';
+        setVoiceStatus('Não foi possível reproduzir a fala personalizada.', true);
+      }
+    };
+    await audioPersonalizado.play();
+  } catch (error) {
+    if (urlAudio) URL.revokeObjectURL(urlAudio);
+    if (geracao !== geracaoAudioPersonalizado) return;
+    setVoiceStatus(error.message, true);
+  }
+}
+
+function configureVoiceInput() {
+  if (!window.MediaRecorder || !navigator.mediaDevices?.getUserMedia || !voiceInput) {
+    if (voiceInput) voiceInput.hidden = true;
+    setVoiceStatus('Este navegador não permite gravar áudio para a transcrição local.');
+    return;
+  }
+  voiceInput.addEventListener('click', async () => {
+    if (recorder?.state === 'recording') {
+      recorder.stop();
+      return;
+    }
+    try {
+      microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : '';
+      recordedChunks = [];
+      recorder = new MediaRecorder(microphoneStream, mimeType ? { mimeType } : undefined);
+      recorder.ondataavailable = event => { if (event.data.size) recordedChunks.push(event.data); };
+      recorder.onstop = transcribeRecordedAudio;
+      recorder.start();
+      voiceInput.classList.add('listening'); voiceInput.setAttribute('aria-pressed', 'true');
+      voiceInput.title = 'Parar gravação e transcrever'; setVoiceStatus('Gravando localmente… clique no microfone para concluir.');
+    } catch (error) {
+      if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
+        setVoiceStatus('Permita o microfone para o G.U.Y. nas configurações do Windows e do Edge.', true);
+      } else {
+        setVoiceStatus('Não foi possível acessar o microfone. Confira se ele está conectado e disponível para aplicativos.', true);
+      }
+    }
+  });
+}
+
+async function transcribeRecordedAudio() {
+  microphoneStream?.getTracks().forEach(track => track.stop()); microphoneStream = null;
+  voiceInput.classList.remove('listening'); voiceInput.setAttribute('aria-pressed', 'false'); voiceInput.title = 'Falar uma mensagem';
+  try {
+    setVoiceStatus('Preparando a transcrição local; na primeira vez, o G.U.Y. baixa o modelo. Isso pode levar alguns minutos…');
+    const wav = await window.audioToWav(new Blob(recordedChunks, { type: recorder?.mimeType || 'audio/webm' }));
+    const formData = new FormData(); formData.append('audio', wav, 'mensagem.wav');
+    const response = await fetch('/api/voz/transcrever', { method: 'POST', body: formData });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.detail || 'Não foi possível transcrever o áudio localmente.');
+    input.value = data.texto; autoGrow(); input.focus(); setVoiceStatus('Mensagem transcrita localmente. Revise ou envie.');
+  } catch (error) { setVoiceStatus(error.message, true); }
+  finally { recorder = null; recordedChunks = []; }
+}
+
+async function loadVoicePreferences() {
+  try {
+    const response = await fetch('/api/perfil');
+    if (!response.ok) return;
+    const profile = await response.json();
+    voicePreferences = { ...voicePreferences, ...(profile.preferencias || {}) };
+  } catch (_) { /* A conversa funciona normalmente sem as preferências. */ }
+}
 function escapeHtml(value) { const el = document.createElement('div'); el.textContent = String(value || ''); return el.innerHTML; }
 function toText(value) { return escapeHtml(value).replace(/\n/g, '<br>'); }
 
@@ -81,13 +221,13 @@ function addDebate(data) {
     <section class="debate-result">
       <div class="debate-heading"><span>⚔️</span> Debate</div>
       <article class="debate-card guy"><div class="message-avatar"><img src="/static/img/guy.png" alt="Guy"></div><div><span class="message-name">Guy</span><p>${toText(guy)}</p></div></article>
-      <article class="debate-card fearth"><div class="message-avatar"><img src="/static/img/fearth.png" alt="Fearth"></div><div><span class="message-name">Fearth · contraponto</span><p>${toText(fearth)}</p></div></article>
+      <article class="debate-card fearth"><div class="message-avatar"><img src="/static/img/guy%20(2).png" alt="Fearth"></div><div><span class="message-name">Fearth · contraponto</span><p>${toText(fearth)}</p></div></article>
       <article class="conclusion"><span>⚔️ CONCLUSÃO DO DEBATE</span><p>${toText(conclusion)}</p></article>
     </section>`);
   scrollToBottom();
 }
 
-function setLoading(loading) { send.disabled = loading; input.disabled = loading; selectorButton.disabled = loading; }
+function setLoading(loading) { send.disabled = loading; input.disabled = loading; selectorButton.disabled = loading; if (voiceInput) voiceInput.disabled = loading; }
 function autoGrow() { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 170)}px`; }
 
 function setKnowledgeStatus(message, error = false) {
@@ -175,8 +315,8 @@ async function sendMessage() {
     const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mensagem: text, agente: currentAgent, temperatura: getTemperatureValue() }) });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.detail || data.erro || 'Não foi possível processar a mensagem.');
-    if (data.modo === 'debate') addDebate(data);
-    else addMessage(data.resposta, 'assistant', data.agente || currentAgent);
+    if (data.modo === 'debate') { addDebate(data); speak(data.conclusao); }
+    else { addMessage(data.resposta, 'assistant', data.agente || currentAgent); speak(data.resposta); }
   } catch (error) { addMessage(`Erro: ${error.message}`, 'assistant', currentAgent); }
   finally { setLoading(false); input.focus(); }
 }
@@ -222,4 +362,5 @@ knowledgeFile?.addEventListener('change', async () => {
     knowledgeAddFile.disabled = false;
   }
 });
+loadVoicePreferences().finally(configureVoiceInput);
 updateAgentInterface(); input.focus();

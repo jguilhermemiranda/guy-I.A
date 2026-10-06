@@ -1,9 +1,10 @@
+import io
 import os
 from pathlib import Path
 
 import ollama
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_file
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
@@ -24,6 +25,22 @@ from .memoria import (
     listar_memorias,
     remover_memoria,
 )
+from .perfil import (
+    atualizar_perfil,
+    construir_contexto_perfil,
+    criar_banco_perfil,
+    instrucao_preferencias,
+    obter_perfil,
+)
+from .voz import (
+    LIMITE_AMOSTRA_BYTES,
+    VozIndisponivel,
+    referencia_voz_disponivel,
+    remover_referencia_voz,
+    salvar_referencia_voz,
+    sintetizar_wav,
+    transcrever_wav,
+)
 
 
 MODELO_GUY = "joaoguilhermeomiranda/guy"
@@ -43,6 +60,8 @@ app = Flask(
     static_folder=str(RESOURCES_DIR / "static"),
 )
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
+app.config["MAX_VOICE_AUDIO_BYTES"] = 15 * 1024 * 1024
+app.config["MAX_VOICE_REFERENCE_BYTES"] = LIMITE_AMOSTRA_BYTES
 
 load_dotenv()
 USUARIO = {
@@ -51,6 +70,13 @@ USUARIO = {
     "tipo": "USER",
 }
 criar_banco_memoria()
+criar_banco_perfil()
+
+
+def contexto_usuario(usuario):
+    """Retorna as preferências e o contexto técnico que valem nesta resposta."""
+    perfil = obter_perfil(usuario["username"])
+    return perfil, construir_contexto_perfil(usuario["username"])
 
 
 def resposta_ollama(modelo, mensagens, temperatura=None, agente="guy"):
@@ -68,12 +94,15 @@ def resposta_ollama(modelo, mensagens, temperatura=None, agente="guy"):
 def responder_fearth(usuario, mensagem, temperatura=None):
     username = usuario["username"]
     historico = historicos_fearth.setdefault(username, [])
+    perfil, contexto_perfil = contexto_usuario(usuario)
     sistema = {
         "role": "system",
         "content": (
             "Você é Fearth, uma agente independente, analítica e respeitosa. "
             "Não concorde automaticamente: aponte premissas frágeis, riscos e "
-            "alternativas quando fizer sentido. Responda em português do Brasil."
+            "alternativas quando fizer sentido.\n\n"
+            f"{instrucao_preferencias(perfil['preferencias'])}\n\n"
+            f"PERFIL TÉCNICO DO USUÁRIO\n{contexto_perfil}"
         ),
     }
     mensagens = [sistema, *historico[-12:], {"role": "user", "content": mensagem}]
@@ -92,25 +121,28 @@ def responder_debate(usuario, pergunta, temperatura=None):
     base = f"Pergunta do usuário: {pergunta}"
     if contexto:
         base = f"Contexto de debates anteriores:\n{contexto}\n\n{base}"
+    perfil, contexto_perfil = contexto_usuario(usuario)
+    preferencias = instrucao_preferencias(perfil["preferencias"])
+    contexto_compartilhado = f"{preferencias}\n\nPERFIL TÉCNICO DO USUÁRIO\n{contexto_perfil}"
 
     guy = resposta_ollama(MODELO_GUY, [
         {
             "role": "system",
-            "content": "Você é Guy. Apresente uma posição inicial útil, objetiva e bem justificada em português do Brasil.",
+            "content": "Você é Guy. Apresente uma posição inicial útil, objetiva e bem justificada.\n\n" + contexto_compartilhado,
         },
         {"role": "user", "content": base},
     ], temperatura=temperatura, agente="guy")
     fearth = resposta_ollama(MODELO_FEARTH, [
         {
             "role": "system",
-            "content": "Você é Fearth, debatedora independente. Analise a pergunta e a posição de Guy. Conteste somente onde houver motivo e ofereça correções práticas. Responda em português do Brasil.",
+            "content": "Você é Fearth, debatedora independente. Analise a pergunta e a posição de Guy. Conteste somente onde houver motivo e ofereça correções práticas.\n\n" + contexto_compartilhado,
         },
         {"role": "user", "content": f"{base}\n\nPosição inicial de Guy:\n{guy}"},
     ], temperatura=temperatura, agente="fearth")
     conclusao = resposta_ollama(MODELO_GUY, [
         {
             "role": "system",
-            "content": "Você é o mediador final de um debate. Produza uma conclusão equilibrada, curta e acionável; reconheça incertezas e diga qual escolha faz mais sentido nas condições dadas. Responda em português do Brasil.",
+            "content": "Você é o mediador final de um debate. Produza uma conclusão equilibrada, curta e acionável; reconheça incertezas e diga qual escolha faz mais sentido nas condições dadas.\n\n" + contexto_compartilhado,
         },
         {"role": "user", "content": f"Pergunta: {pergunta}\n\nGuy:\n{guy}\n\nFearth:\n{fearth}"},
     ], temperatura=temperatura, agente="guy")
@@ -171,6 +203,126 @@ def nova_conversa():
     historicos_fearth.pop(username, None)
     historicos_debate.pop(username, None)
     return jsonify({"sucesso": True})
+
+
+@app.route("/api/voz/transcrever", methods=["POST"])
+def api_transcrever_voz():
+    arquivo = request.files.get("audio")
+    if not arquivo:
+        return jsonify({"detail": "Envie um áudio para transcrever."}), 400
+    audio = arquivo.read(app.config["MAX_VOICE_AUDIO_BYTES"] + 1)
+    if len(audio) > app.config["MAX_VOICE_AUDIO_BYTES"]:
+        return jsonify({"detail": "O áudio excede o limite de 15 MB."}), 413
+    try:
+        texto = transcrever_wav(audio)
+    except VozIndisponivel as erro:
+        return jsonify({"detail": str(erro)}), 503
+    except ValueError as erro:
+        return jsonify({"detail": str(erro)}), 400
+    except Exception as erro:
+        app.logger.exception("Erro na transcrição local: %s", erro)
+        return jsonify({"detail": "Não foi possível transcrever este áudio localmente."}), 500
+    if not texto:
+        return jsonify({"detail": "Não foi detectada fala. Tente novamente mais perto do microfone."}), 422
+    return jsonify({"texto": texto})
+
+
+@app.route("/api/voz/referencia", methods=["GET"])
+def api_estado_referencia_voz():
+    return jsonify({"disponivel": referencia_voz_disponivel()})
+
+
+@app.route("/api/voz/referencia", methods=["POST"])
+def api_salvar_referencia_voz():
+    arquivo = request.files.get("audio")
+    if not arquivo:
+        return jsonify({"detail": "Envie uma gravação para salvar."}), 400
+    audio = arquivo.read(app.config["MAX_VOICE_REFERENCE_BYTES"] + 1)
+    if len(audio) > app.config["MAX_VOICE_REFERENCE_BYTES"]:
+        return jsonify({"detail": "A gravação excede o limite de 5 MB."}), 413
+    try:
+        salvar_referencia_voz(audio)
+    except ValueError as erro:
+        return jsonify({"detail": str(erro)}), 400
+    except Exception as erro:
+        app.logger.exception("Erro ao salvar a referência de voz: %s", erro)
+        return jsonify({"detail": "Não foi possível salvar a amostra de voz localmente."}), 500
+    return jsonify({"sucesso": True})
+
+
+@app.route("/api/voz/referencia", methods=["DELETE"])
+def api_remover_referencia_voz():
+    try:
+        remover_referencia_voz()
+        atualizar_perfil(
+            USUARIO["username"],
+            {"preferencias": {"usar_voz_personalizada": False}},
+        )
+    except OSError as erro:
+        app.logger.exception("Erro ao remover a referência de voz: %s", erro)
+        return jsonify({"detail": "Não foi possível remover a amostra de voz."}), 500
+    except Exception as erro:
+        app.logger.exception("Erro ao atualizar as preferências de voz: %s", erro)
+        return jsonify({
+            "detail": "A amostra foi apagada, mas não foi possível atualizar as preferências."
+        }), 500
+    return jsonify({"sucesso": True})
+
+
+@app.route("/api/voz/sintetizar", methods=["POST"])
+def api_sintetizar_voz():
+    dados = request.get_json(silent=True)
+    if not isinstance(dados, dict):
+        return jsonify({"detail": "JSON inválido."}), 400
+    texto = str(dados.get("texto", "")).strip()
+    idioma = str(dados.get("idioma", "pt-BR"))
+    idiomas = {"pt-BR": "pt", "en-US": "en", "es-ES": "es"}
+    if idioma not in idiomas:
+        return jsonify({"detail": "O idioma selecionado não é compatível com a voz."}), 400
+    try:
+        audio = sintetizar_wav(texto, idioma=idiomas[idioma])
+    except VozIndisponivel as erro:
+        return jsonify({"detail": str(erro)}), 503
+    except ValueError as erro:
+        return jsonify({"detail": str(erro)}), 400
+    except Exception as erro:
+        app.logger.exception("Erro na síntese local de voz: %s", erro)
+        return jsonify({"detail": "Não foi possível sintetizar a fala localmente."}), 500
+    return send_file(
+        io.BytesIO(audio),
+        mimetype="audio/wav",
+        download_name="resposta.wav",
+    )
+
+
+@app.route("/perfil")
+def perfil():
+    return render_template("perfil.html")
+
+
+@app.route("/api/perfil", methods=["GET"])
+def api_obter_perfil():
+    return jsonify(obter_perfil(USUARIO["username"]))
+
+
+@app.route("/api/perfil", methods=["PUT"])
+def api_atualizar_perfil():
+    dados = request.get_json(silent=True)
+    if not isinstance(dados, dict):
+        return jsonify({"detail": "JSON inválido."}), 400
+    preferencias = dados.get("preferencias", {})
+    if (
+        isinstance(preferencias, dict)
+        and preferencias.get("usar_voz_personalizada")
+        and not referencia_voz_disponivel()
+    ):
+        return jsonify({
+            "detail": "Grave e salve uma amostra antes de ativar a voz personalizada."
+        }), 400
+    try:
+        return jsonify(atualizar_perfil(USUARIO["username"], dados))
+    except ValueError as erro:
+        return jsonify({"detail": str(erro)}), 400
 
 
 @app.route("/api/conhecimento/arquivos", methods=["POST"])

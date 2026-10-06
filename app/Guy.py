@@ -19,6 +19,7 @@ from .memoria import (
     adicionar_memoria,
     construir_contexto_memoria
 )
+from .perfil import construir_contexto_perfil, instrucao_preferencias, obter_perfil
 
 VERMELHO = "\033[91m"
 AMARELO = "\033[93m"
@@ -802,6 +803,12 @@ def processar_mensagem(usuario, pergunta, agente="guy", temperatura=None):
         historicos[username] = []
 
     historico = historicos[username]
+    perfil = obter_perfil(username)
+    try:
+        contexto_perfil = construir_contexto_perfil(username)
+    except Exception as erro:
+        print(f"{AMARELO}Aviso no perfil técnico: {erro}{RESET}")
+        contexto_perfil = "O perfil técnico não está disponível nesta mensagem."
 
     try:
         collection = obter_colecao()
@@ -912,6 +919,12 @@ FEARTH-IA
 
 MEMÓRIAS SOBRE O USUÁRIO
 {memorias}
+
+PERFIL TÉCNICO E FONTES PÚBLICAS DO USUÁRIO
+{contexto_perfil}
+
+FORMA DE RESPOSTA
+{instrucao_preferencias(perfil['preferencias'])}
 
 HISTÓRICO RECENTE
 {historico_texto or "Sem histórico recente."}

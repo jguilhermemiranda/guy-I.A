@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Perfil e preferências · Guy</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="settings-page">
+    <header class="settings-header">
+      <a class="back-link" href="/">← Voltar ao chat</a>
+      <div><p class="eyebrow">PERSONALIZAÇÃO LOCAL</p><h1>Perfil e preferências</h1><p>O Guy e a Fearth usam estas informações como contexto em conversas futuras.</p></div>
+    </header>
+    <form id="profile-form" class="settings-grid">
+      <section class="settings-card">
+        <h2>Sobre você</h2>
+        <p class="settings-help">Essas informações ajudam o Guy e a Fearth a conversar com você de forma mais pessoal.</p>
+        <label for="profile-name">Como devo te chamar?</label>
+        <input id="profile-name" type="text" maxlength="80" autocomplete="name" placeholder="Seu nome ou apelido">
+        <label for="profile-username">Nome de usuário</label>
+        <input id="profile-username" type="text" maxlength="60" autocomplete="username" placeholder="@seu_usuario">
+        <hr>
+        <h2>Seu contexto técnico</h2>
+        <p class="settings-help">Fontes são consultadas somente quando você envia uma mensagem. Use apenas URLs públicas.</p>
+        <label for="github-url">GitHub (perfil ou repositório público)</label>
+        <input id="github-url" type="url" placeholder="https://github.com/seu-usuario ou /seu-repo">
+        <label for="profile-notes">Como você pensa e programa</label>
+        <textarea id="profile-notes" rows="7" maxlength="4000" placeholder="Ex.: uso TypeScript, prefiro testes antes de refatorar e explicações com exemplos práticos."></textarea>
+        <div class="source-heading"><strong>Outras fontes</strong><button id="add-source" class="button-secondary compact" type="button">＋ Adicionar fonte</button></div>
+        <div id="sources" class="source-list"></div>
+      </section>
+      <section class="settings-card">
+        <h2>Como responder</h2>
+        <label for="tone">Tom</label>
+        <select id="tone"><option value="colaborativo">Colaborativo</option><option value="direto">Direto</option><option value="didático">Didático</option><option value="crítico">Crítico</option></select>
+        <label for="concision">Nível de detalhe</label>
+        <select id="concision"><option value="conciso">Conciso</option><option value="equilibrado">Equilibrado</option><option value="detalhado">Detalhado</option></select>
+        <label for="language">Idioma</label>
+        <select id="language"><option value="pt-BR">Português (Brasil)</option><option value="en-US">English</option><option value="es-ES">Español</option></select>
+        <hr>
+        <h2>Voz</h2>
+        <p class="settings-help">Você pode usar uma voz instalada no Windows ou clonar localmente uma amostra sua. Ao testar ou usar a voz clonada pela primeira vez, o G.U.Y. instala o componente e baixa o modelo automaticamente; pode levar alguns minutos. O áudio permanece no computador.</p>
+        <label class="toggle-row" for="speak-responses"><input id="speak-responses" type="checkbox"><span>Falar as respostas automaticamente</span></label>
+        <label for="voice">Voz de saída</label>
+        <select id="voice"><option value="">Voz padrão do sistema</option></select>
+        <label class="consent-row" for="voice-consent"><input id="voice-consent" type="checkbox"><span>Confirmo que a amostra é da minha voz ou que tenho autorização para usá-la.</span></label>
+        <div class="voice-reading">
+          <strong>Leia este texto durante a gravação</strong>
+          <p>Oi! Hoje é um ótimo dia para começar um projeto novo. Eu gosto de conversar com calma, explicar minhas ideias e encontrar soluções que façam sentido. Às vezes, uma pergunta simples abre caminhos diferentes. Se algo der errado, tudo bem: a gente respira, aprende com a experiência e tenta de novo. Vamos descobrir juntos o próximo passo.</p>
+          <small>Fale como numa conversa normal, em um lugar silencioso. Leia até o fim sem pressa; não precisa preencher os 30 segundos.</small>
+        </div>
+        <div class="voice-sample-actions">
+          <button id="record-voice" class="button-secondary" type="button" disabled>Gravar amostra</button>
+          <button id="stop-voice" class="button-secondary" type="button" hidden>Parar e salvar</button>
+          <button id="delete-voice" class="button-secondary" type="button" hidden>Apagar amostra</button>
+        </div>
+        <p id="voice-sample-status" class="settings-help" role="status" aria-live="polite"></p>
+        <label class="toggle-row" for="custom-voice"><input id="custom-voice" type="checkbox" disabled><span>Usar minha voz clonada nas respostas</span></label>
+        <button id="preview-voice" class="button-secondary" type="button">▶ Testar voz</button>
+      </section>
+      <footer class="settings-actions"><p id="save-status" role="status"></p><button class="button-primary" type="submit">Salvar preferências</button></footer>
+    </form>
+  </main>
+  <script src="{{ url_for('static', filename='audio.js') }}"></script>
+  <script src="{{ url_for('static', filename='profile.js') }}"></script>
+</body>
+</html>

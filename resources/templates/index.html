@@ -17,6 +17,7 @@
                 <button class="sidebar-button" id="add-knowledge" type="button">📚 Base de conhecimento</button>
                 <input id="knowledge-file" type="file" accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown" hidden>
                 <button class="sidebar-button" type="button" onclick="window.location.href='/memorias'">🧠 Memórias</button>
+                <button class="sidebar-button" type="button" onclick="window.location.href='/perfil'">⚙️ Perfil e preferências</button>
             </div>
         </aside>
 
@@ -30,7 +31,7 @@
                     </button>
                     <div class="agent-menu" id="agent-menu" role="menu">
                         <button class="agent-option active guy" data-agent="guy" type="button"><img src="/static/img/guy.png" alt=""><span><strong>Guy</strong><small>Agente principal</small></span><b>✓</b></button>
-                        <button class="agent-option fearth" data-agent="fearth" type="button"><img src="/static/img/fearth.png" alt=""><span><strong>Fearth</strong><small>Agente independente</small></span><b>✓</b></button>
+                        <button class="agent-option fearth" data-agent="fearth" type="button"><img src="/static/img/guy%20(2).png" alt=""><span><strong>Fearth</strong><small>Agente independente</small></span><b>✓</b></button>
                         <button class="agent-option debate" data-agent="debate" type="button"><span class="mode-icon">⚔️</span><span><strong>Debate</strong><small>Guy × Fearth</small></span><b>✓</b></button>
                     </div>
                 </div>
@@ -53,7 +54,8 @@
                         <output id="temperature-value" for="temperature-slider">0.20</output>
                     </label>
                 </div>
-                <div class="input-box"><textarea id="message" rows="1" placeholder="Digite sua mensagem..."></textarea><button id="send" type="button" aria-label="Enviar mensagem">➤</button></div>
+                <div class="input-box"><textarea id="message" rows="1" placeholder="Digite sua mensagem..."></textarea><button id="voice-input" type="button" aria-label="Falar uma mensagem" title="Falar uma mensagem">🎙</button><button id="send" type="button" aria-label="Enviar mensagem">➤</button></div>
+                <p class="voice-status" id="voice-status" role="status"></p>
                 <p class="disclaimer">Guy e Fearth podem cometer erros. Confira informações importantes.</p>
             </div>
         </main>
@@ -73,6 +75,7 @@
             <div class="knowledge-files" id="knowledge-files" aria-live="polite"></div>
         </section>
     </div>
+    <script src="{{ url_for('static', filename='audio.js') }}"></script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

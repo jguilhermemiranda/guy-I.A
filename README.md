@@ -17,15 +17,16 @@ Assistente local de desktop para Windows, com interface própria, memória persi
 | Requisito | Observação |
 |---|---|
 | Windows | Sistema suportado no projeto |
-| Python 3.14+ | Necessário para criar o ambiente virtual |
-| [Ollama](https://ollama.com) | Deve estar em execução durante a preparação e o uso |
+| Windows com `winget` | Usado para instalar Python 3.14 e Ollama automaticamente quando necessário |
+| Python 3.14+ | Instalado pelo inicializador se estiver ausente |
+| [Ollama](https://ollama.com) | Instalado e iniciado pelo inicializador quando necessário |
 | RAM / VRAM / espaço em disco | Depende dos modelos baixados e do tamanho da base de conhecimento |
 
-> O projeto define `requires-python = ">=3.14"` em `pyproject.toml` e o script de inicialização também valida Python 3.14 ou superior.
+> O projeto define `requires-python = ">=3.14"` em `pyproject.toml`. No Windows, `scripts\iniciar.bat` usa o `winget` (Instalador de Aplicativos do Windows) para preparar o Python 3.14 quando ele não está instalado.
 
 ## Modelos usados
 
-Os modelos abaixo são baixados/atualizados pelo script de preparação:
+Os modelos abaixo são baixados automaticamente na primeira inicialização:
 
 | Modelo | Função |
 |---|---|
@@ -35,32 +36,20 @@ Os modelos abaixo são baixados/atualizados pelo script de preparação:
 
 ## Início rápido
 
-1. Instale o Python 3.14 e o Ollama.
-2. Inicie o Ollama.
-3. Rode o script de preparação:
-
-```powershell
-scripts\pre-comit.bat
-```
-
-Esse script cria a pasta `models/` se necessário e faz o download dos modelos usados pelo aplicativo.
-
-4. Inicie a aplicação:
+1. Abra o aplicativo pelo inicializador:
 
 ```powershell
 scripts\iniciar.bat
 ```
 
-Na primeira execução, o script cria o ambiente virtual, instala as dependências e inicia o app. Nas próximas vezes, basta executar o mesmo arquivo novamente.
+Na primeira execução, o inicializador prepara o Python 3.14 e o ambiente virtual, instala as dependências, instala/inicia o Ollama e baixa os modelos necessários. A preparação acontece numa única janela; não é preciso fechar o app para abrir outros scripts. Os modelos e dependências já instalados são reutilizados nas próximas inicializações.
 
 ## Execução manual
 
-Se preferir rodar sem os arquivos `.bat`:
+Se preferir rodar sem o inicializador:
 
 ```powershell
-py -3.14 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe main.py
+py -3.14 scripts\bootstrap.py
 ```
 
 ## Configuração
@@ -76,6 +65,20 @@ Exemplo:
 ```env
 GUY_USERNAME=seu_nome
 ```
+
+## Voz, perfil e preferências
+
+- No chat, o botão de microfone grava no navegador e transcreve localmente com Whisper. A transcrição aparece no campo antes de ser enviada, para que você possa revisá-la.
+- Em **Perfil e preferências**, você pode escolher tom, nível de detalhe, idioma e a voz de saída; a opção de falar respostas é desligada por padrão. A fala do Guy também omite a formatação de Markdown e blocos de código para soar mais natural.
+- O perfil também permite informar nome e nome de usuário para personalizar o contexto das respostas. Esses campos não alteram o identificador local usado para separar memórias.
+- A fala pode usar vozes instaladas no Windows ou uma amostra de voz gravada em **Perfil e preferências**. A tela mostra um pequeno roteiro em português para a pessoa ler sem improvisar durante a gravação. Para clonagem local, confirme que a voz é sua ou que você tem autorização e grave de 5 a 30 segundos. Ao testar ou usar a voz pela primeira vez, o G.U.Y. instala automaticamente o componente `coqui-tts` e baixa o modelo XTTS-v2; esse primeiro uso pode levar alguns minutos e requer internet. Depois, a geração e o áudio de referência ficam no computador. O modelo é destinado a uso não comercial conforme sua licença.
+- A amostra fica em `data/voz/` (ignorada pelo Git), pode ser apagada pela tela de preferências e não é enviada a um serviço externo.
+- O perfil aceita uma URL pública de perfil ou repositório do GitHub, notas sobre seu estilo de programação e até cinco fontes públicas adicionais. O conteúdo dessas fontes é consultado somente no momento de responder e é usado como contexto para Guy, Fearth e Debate.
+- As preferências e notas ficam apenas em `data/perfil.db`. O G.U.Y. não grava token do GitHub e não acessa repositórios privados.
+
+Após iniciar o G.U.Y. pelo fluxo normal, a primeira transcrição baixa automaticamente o modelo multilíngue `faster-whisper-base` (cerca de 150 MB). A preparação da fala clonada também ocorre automaticamente no primeiro teste ou uso da voz personalizada. Ambos exigem internet apenas na primeira preparação.
+
+> Se a captura de áudio não estiver disponível no WebView/Edge, o chat continua funcionando por texto e informa isso na própria tela.
 
 ## Base de conhecimento
 
@@ -113,7 +116,7 @@ A pasta `data/` também guarda bancos e índices locais usados durante a execuç
 ├── data/               # bancos, índices e arquivos locais de conhecimento
 ├── models/             # pasta opcional para arquivos locais de configuração/modelo
 ├── resources/          # templates, CSS, JS e imagens da interface
-├── scripts/            # scripts de preparação e inicialização no Windows
+├── scripts/            # inicializador automático do Windows
 ├── .env.example        # exemplo de variáveis de ambiente
 ├── main.py             # ponto de entrada
 ├── pyproject.toml      # configuração do projeto
@@ -124,7 +127,7 @@ A pasta `data/` também guarda bancos e índices locais usados durante a execuç
 
 ## Solução de problemas
 
-- **Falha ao baixar os modelos**: confirme que o Ollama está em execução antes de rodar `scripts\pre-comit.bat`.
+- **Falha ao baixar os modelos**: confirme que o Ollama está em execução antes de rodar `scripts\preparar-modelos.bat`.
 - **Python não encontrado**: instale o Python 3.14 ou superior e tente novamente.
 - **Ambiente virtual inválido**: delete a pasta `.venv` e rode `scripts\iniciar.bat` novamente.
 - **Arquivo não indexa**: verifique se o arquivo está em um formato suportado, tem conteúdo legível e não está vazio.

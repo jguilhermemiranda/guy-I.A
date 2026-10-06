@@ -7,3 +7,4 @@ pypdf
 ddgs
 pywebview
 python-dotenv
+faster-whisper
