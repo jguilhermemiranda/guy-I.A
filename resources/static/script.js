@@ -13,6 +13,9 @@ const selector = document.querySelector('#agent-selector');
 const selectorButton = document.querySelector('#agent-selector-button');
 const menu = document.querySelector('#agent-menu');
 const title = document.querySelector('#conversation-title');
+const temperatureSlider = document.querySelector('#temperature-slider');
+const temperatureValue = document.querySelector('#temperature-value');
+const DEFAULT_TEMPERATURE = 0.2;
 
 const agents = {
   guy: { name: 'Guy', description: 'Agente principal', avatar: '/static/img/guy.png', heading: 'Fala, Guy aqui. 👋', text: 'Manda a pergunta, projeto ou problema.<br>Vamos descobrir juntos.', css: 'guy' },
@@ -21,6 +24,26 @@ const agents = {
 };
 let currentAgent = localStorage.getItem('guy_agente') || 'guy';
 if (!agents[currentAgent]) currentAgent = 'guy';
+
+function getTemperatureValue() {
+  const value = Number(temperatureSlider?.value ?? DEFAULT_TEMPERATURE);
+  if (!Number.isFinite(value)) return DEFAULT_TEMPERATURE;
+  return Math.min(1, Math.max(0, value));
+}
+
+function updateTemperatureLabel() {
+  if (!temperatureSlider || !temperatureValue) return;
+  const value = getTemperatureValue();
+  temperatureValue.textContent = value.toFixed(2);
+  localStorage.setItem('guy_temperature', String(value));
+}
+
+const storedTemperature = Number(localStorage.getItem('guy_temperature'));
+if (temperatureSlider) {
+  const initialValue = Number.isFinite(storedTemperature) ? storedTemperature : DEFAULT_TEMPERATURE;
+  temperatureSlider.value = String(Math.min(1, Math.max(0, initialValue)));
+  updateTemperatureLabel();
+}
 
 function scrollToBottom() { messages.scrollTop = messages.scrollHeight; }
 function escapeHtml(value) { const el = document.createElement('div'); el.textContent = String(value || ''); return el.innerHTML; }
@@ -149,7 +172,7 @@ async function sendMessage() {
   addMessage(text, 'user');
   input.value = ''; autoGrow(); setLoading(true);
   try {
-    const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mensagem: text, agente: currentAgent }) });
+    const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mensagem: text, agente: currentAgent, temperatura: getTemperatureValue() }) });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.detail || data.erro || 'Não foi possível processar a mensagem.');
     if (data.modo === 'debate') addDebate(data);
@@ -162,6 +185,7 @@ selectorButton.addEventListener('click', event => { event.stopPropagation(); con
 document.querySelectorAll('.agent-option').forEach(option => option.addEventListener('click', () => { if (send.disabled) return; currentAgent = option.dataset.agent; localStorage.setItem('guy_agente', currentAgent); menu.classList.remove('open'); selectorButton.setAttribute('aria-expanded', 'false'); updateAgentInterface(); showWelcome(); input.value = ''; autoGrow(); input.focus(); }));
 document.addEventListener('click', event => { if (!selector.contains(event.target)) { menu.classList.remove('open'); selectorButton.setAttribute('aria-expanded', 'false'); } });
 send.addEventListener('click', sendMessage);
+temperatureSlider?.addEventListener('input', updateTemperatureLabel);
 input.addEventListener('input', autoGrow);
 input.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendMessage(); } });
 newChat?.addEventListener('click', async () => { if (send.disabled) return; newChat.disabled = true; try { const response = await fetch('/nova-conversa', { method: 'POST', headers: { 'Content-Type': 'application/json' } }); if (!response.ok) throw new Error('Não foi possível iniciar uma nova conversa.'); showWelcome(); if (title) title.textContent = 'Nova conversa'; } catch (error) { addMessage(`Erro: ${error.message}`, 'assistant'); } finally { newChat.disabled = false; input.focus(); } });

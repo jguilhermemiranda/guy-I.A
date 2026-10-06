@@ -22,6 +22,9 @@ from .memoria import (
 
 VERMELHO = "\033[91m"
 AMARELO = "\033[93m"
+VERDE = "\033[92m"
+CIANO = "\033[96m"
+ROXO = "\033[95m"
 RESET = "\033[0m"
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -55,6 +58,37 @@ USER_AGENT = (
 )
 
 historicos = {}
+
+TEMPERATURA_PADRAO_GUY = 0.2
+TEMPERATURA_PADRAO_FEARTH = 0.1
+
+
+def normalizar_temperatura(temperatura, padrao):
+    try:
+        valor = float(temperatura)
+    except (TypeError, ValueError):
+        return float(padrao)
+
+    valor = max(0.0, min(1.0, valor))
+    return float(valor)
+
+
+def opcoes_modelo(agente="guy", temperatura=None):
+    padrao = TEMPERATURA_PADRAO_FEARTH if agente == "fearth" else TEMPERATURA_PADRAO_GUY
+    temperatura_final = normalizar_temperatura(temperatura, padrao)
+
+    if agente == "fearth":
+        return {
+            "temperature": temperatura_final,
+            "top_p": 0.7,
+            "seed": 42
+        }
+
+    return {
+        "temperature": temperatura_final,
+        "top_p": 0.8,
+        "seed": 42
+    }
 
 
 def ler_pdf(caminho):
@@ -126,7 +160,15 @@ def gerar_embedding(texto):
         input=texto
     )
 
-    return resposta["embeddings"][0]
+    if isinstance(resposta, dict):
+        embeddings = resposta.get("embeddings") or []
+    else:
+        embeddings = getattr(resposta, "embeddings", [])
+
+    if not embeddings:
+        raise ValueError("A resposta de embedding não retornou embeddings.")
+
+    return embeddings[0]
 
 
 def gerar_hash_arquivo(caminho):
@@ -271,12 +313,17 @@ def atualizar_banco():
             include=["metadatas"]
         )
 
-        metadatas = resultado.get("metadatas", [])
-        hashes_antigos = {
-            metadata.get("hash_arquivo")
-            for metadata in metadatas
-            if metadata
-        }
+        metadatas = resultado.get("metadatas") or []
+        hashes_antigos = set()
+
+        for metadata in metadatas:
+            if not metadata:
+                continue
+
+            hash_arquivo = metadata.get("hash_arquivo")
+
+            if isinstance(hash_arquivo, (str, bytes, int, float, bool)):
+                hashes_antigos.add(hash_arquivo)
 
         if hashes_antigos == {hash_atual}:
             print(f"{VERDE}✓ Já atualizado: {arquivo.name}{RESET}")
@@ -519,7 +566,7 @@ def chamou_fearth(pergunta):
     return any(termo in pergunta_normalizada for termo in termos)
 
 
-def consultar_fearth(pergunta, historico, contexto, contexto_web):
+def consultar_fearth(pergunta, historico, contexto, contexto_web, temperatura=None):
     prompt = f"""
 Você é Fearth-IA, um agente independente que está sendo consultado por Guy.
 
@@ -549,7 +596,8 @@ SOLICITAÇÃO DO USUÁRIO:
                     "role": "user",
                     "content": prompt
                 }
-            ]
+            ],
+            options=opcoes_modelo("fearth", temperatura)
         )
 
         conteudo = resposta["message"]["content"].strip()
@@ -743,7 +791,7 @@ def montar_historico_texto(historico):
     return "\n".join(partes)
 
 
-def processar_mensagem(usuario, pergunta, agente="guy"):
+def processar_mensagem(usuario, pergunta, agente="guy", temperatura=None):
     username = usuario["username"]
     agente = str(agente).strip().lower()
 
@@ -783,7 +831,8 @@ def processar_mensagem(usuario, pergunta, agente="guy"):
             pergunta,
             historico_texto,
             contexto,
-            contexto_web
+            contexto_web,
+            temperatura=temperatura
         )
 
         if not resposta:
@@ -810,7 +859,8 @@ def processar_mensagem(usuario, pergunta, agente="guy"):
             pergunta,
             historico_texto,
             contexto,
-            contexto_web
+            contexto_web,
+            temperatura=temperatura
         )
 
         # Não deixa Guy improvisar, simular ou inventar uma fala da Fearth.
@@ -884,7 +934,8 @@ memórias, pesquisa web ou respostas da Fearth-IA.
     try:
         resposta_modelo = ollama.chat(
             model=MODELO_GUY,
-            messages=mensagens
+            messages=mensagens,
+            options=opcoes_modelo("guy", temperatura)
         )
 
         resposta = resposta_modelo["message"]["content"].strip()

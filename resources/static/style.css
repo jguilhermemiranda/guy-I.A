@@ -1245,6 +1245,40 @@ button:disabled {
     margin: 0 auto;
 }
 
+.temperature-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 10px;
+}
+
+.temperature-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border-soft);
+    background: rgba(255, 255, 255, 0.02);
+    color: var(--text-dim);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.temperature-control input[type="range"] {
+    width: 120px;
+    accent-color: var(--violet-400);
+}
+
+.temperature-control output {
+    min-width: 38px;
+    text-align: right;
+    color: var(--text);
+    font-size: 11.5px;
+    font-weight: 700;
+}
+
 .input-box {
     display: flex;
 

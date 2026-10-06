@@ -11,7 +11,9 @@ from .Guy import (
     BANCO_DIR,
     historicos,
     indexar_arquivo,
+    normalizar_temperatura,
     obter_colecao,
+    opcoes_modelo,
     processar_mensagem,
     remover_documento,
 )
@@ -51,15 +53,19 @@ USUARIO = {
 criar_banco_memoria()
 
 
-def resposta_ollama(modelo, mensagens):
-    resposta = ollama.chat(model=modelo, messages=mensagens)
+def resposta_ollama(modelo, mensagens, temperatura=None, agente="guy"):
+    resposta = ollama.chat(
+        model=modelo,
+        messages=mensagens,
+        options=opcoes_modelo(agente, temperatura),
+    )
     conteudo = resposta.get("message", {}).get("content", "").strip()
     if not conteudo:
         raise RuntimeError("O Ollama não retornou uma resposta.")
     return conteudo
 
 
-def responder_fearth(usuario, mensagem):
+def responder_fearth(usuario, mensagem, temperatura=None):
     username = usuario["username"]
     historico = historicos_fearth.setdefault(username, [])
     sistema = {
@@ -71,7 +77,7 @@ def responder_fearth(usuario, mensagem):
         ),
     }
     mensagens = [sistema, *historico[-12:], {"role": "user", "content": mensagem}]
-    resposta = resposta_ollama(MODELO_FEARTH, mensagens)
+    resposta = resposta_ollama(MODELO_FEARTH, mensagens, temperatura=temperatura, agente="fearth")
     historico.extend([
         {"role": "user", "content": mensagem},
         {"role": "assistant", "content": resposta},
@@ -79,7 +85,7 @@ def responder_fearth(usuario, mensagem):
     return resposta
 
 
-def responder_debate(usuario, pergunta):
+def responder_debate(usuario, pergunta, temperatura=None):
     username = usuario["username"]
     historico = historicos_debate.setdefault(username, [])
     contexto = "\n\n".join(historico[-6:])
@@ -93,21 +99,21 @@ def responder_debate(usuario, pergunta):
             "content": "Você é Guy. Apresente uma posição inicial útil, objetiva e bem justificada em português do Brasil.",
         },
         {"role": "user", "content": base},
-    ])
+    ], temperatura=temperatura, agente="guy")
     fearth = resposta_ollama(MODELO_FEARTH, [
         {
             "role": "system",
             "content": "Você é Fearth, debatedora independente. Analise a pergunta e a posição de Guy. Conteste somente onde houver motivo e ofereça correções práticas. Responda em português do Brasil.",
         },
         {"role": "user", "content": f"{base}\n\nPosição inicial de Guy:\n{guy}"},
-    ])
+    ], temperatura=temperatura, agente="fearth")
     conclusao = resposta_ollama(MODELO_GUY, [
         {
             "role": "system",
             "content": "Você é o mediador final de um debate. Produza uma conclusão equilibrada, curta e acionável; reconheça incertezas e diga qual escolha faz mais sentido nas condições dadas. Responda em português do Brasil.",
         },
         {"role": "user", "content": f"Pergunta: {pergunta}\n\nGuy:\n{guy}\n\nFearth:\n{fearth}"},
-    ])
+    ], temperatura=temperatura, agente="guy")
     historico.extend([
         f"Usuário: {pergunta}",
         f"Guy: {guy}",
@@ -131,6 +137,8 @@ def chat():
 
     mensagem = str(dados.get("mensagem", "")).strip()
     agente = str(dados.get("agente", "guy")).lower().strip()
+    temperatura = dados.get("temperatura")
+    temperatura = normalizar_temperatura(temperatura, 0.2)
     if not mensagem:
         return jsonify({"detail": "A mensagem não pode estar vazia."}), 400
     if agente not in AGENTES_VALIDOS:
@@ -138,19 +146,18 @@ def chat():
 
     try:
         if agente == "debate":
-            return jsonify(responder_debate(USUARIO, mensagem))
+            return jsonify(responder_debate(USUARIO, mensagem, temperatura=temperatura))
         if agente == "fearth":
             return jsonify({
                 "modo": "simples",
                 "agente": "fearth",
-                "resposta": responder_fearth(USUARIO, mensagem),
+                "resposta": responder_fearth(USUARIO, mensagem, temperatura=temperatura),
             })
 
-        # Não altera o Guy.py: RAG e memórias existentes continuam funcionando.
         return jsonify({
             "modo": "simples",
             "agente": "guy",
-            "resposta": processar_mensagem(USUARIO, mensagem),
+            "resposta": processar_mensagem(USUARIO, mensagem, temperatura=temperatura),
         })
     except Exception as erro:
         app.logger.exception("Erro no chat: %s", erro)
