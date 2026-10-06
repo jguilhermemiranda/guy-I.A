@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Memórias — Guy</title>
+
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+
+<div class="app">
+
+    <aside class="sidebar">
+
+        <div class="logo">
+            <div class="logo-icon">
+                <img src="/static/img/guy.png" alt="Guy">
+            </div>
+
+            <span>Guy</span>
+        </div>
+
+        <button class="new-chat" onclick="window.location.href='/inicio'">
+            ← Voltar para conversa
+        </button>
+
+        <div class="sidebar-section">
+            <span>SISTEMA</span>
+        </div>
+
+        <div class="conversations">
+
+            <div class="conversation active">
+                <span>🧠</span>
+                <span>Memórias</span>
+            </div>
+
+        </div>
+
+        <div class="sidebar-bottom">
+
+            <button class="sidebar-button" onclick="window.location.href='/inicio'">
+                💬 Conversas
+            </button>
+
+        </div>
+
+    </aside>
+
+
+    <main class="chat memories-page">
+
+        <header class="topbar">
+
+            <div>
+                <h2>Memórias</h2>
+
+                <span class="status">
+                    <span class="status-dot"></span>
+                    Memória do usuário
+                </span>
+            </div>
+
+        </header>
+
+
+        <section class="memories-content">
+
+            <div class="memories-header">
+
+                <div>
+                    <h1>🧠 O que Guy sabe sobre você</h1>
+
+                    <p>
+                        Aqui você pode visualizar, adicionar,
+                        editar ou apagar informações que Guy
+                        guarda sobre você.
+                    </p>
+                </div>
+
+            </div>
+
+
+            <section class="memory-add-card">
+
+                <div class="section-title">
+                    <div>
+                        <h2>Adicionar memória</h2>
+
+                        <p>
+                            Adicione algo que você quer que Guy lembre.
+                        </p>
+                    </div>
+                </div>
+
+                <form id="memory-form">
+
+                    <div class="form-row">
+
+                        <div class="form-group memory-text">
+
+                            <label for="memoria">
+                                Memória
+                            </label>
+
+                            <input
+                                type="text"
+                                id="memoria"
+                                placeholder="Ex: Guy gosta de programação"
+                                required
+                            >
+
+                        </div>
+
+
+                        <div class="form-group">
+
+                            <label for="categoria">
+                                Categoria
+                            </label>
+
+                            <select id="categoria">
+
+                                <option value="geral">
+                                    Geral
+                                </option>
+
+                                <option value="preferencias">
+                                    Preferências
+                                </option>
+
+                                <option value="projetos">
+                                    Projetos
+                                </option>
+
+                                <option value="estudos">
+                                    Estudos
+                                </option>
+
+                                <option value="tecnologia">
+                                    Tecnologia
+                                </option>
+
+                                <option value="outros">
+                                    Outros
+                                </option>
+
+                            </select>
+
+                        </div>
+
+
+                        <div class="form-group importance-group">
+
+                            <label for="importancia">
+                                Importância
+                            </label>
+
+                            <select id="importancia">
+
+                                <option value="1">⭐</option>
+                                <option value="2">⭐⭐</option>
+                                <option value="3" selected>⭐⭐⭐</option>
+                                <option value="4">⭐⭐⭐⭐</option>
+                                <option value="5">⭐⭐⭐⭐⭐</option>
+
+                            </select>
+
+                        </div>
+
+
+                        <button
+                            type="submit"
+                            class="memory-add-button"
+                        >
+                            + Adicionar
+                        </button>
+
+                    </div>
+
+                </form>
+
+            </section>
+
+
+            <section class="memory-list-section">
+
+                <div class="section-title memory-list-header">
+
+                    <div>
+                        <h2>Memórias salvas</h2>
+
+                        <p id="memory-count">
+                            Carregando memórias...
+                        </p>
+                    </div>
+
+                </div>
+
+
+                <div
+                    id="memories-list"
+                    class="memories-list"
+                >
+
+                    <div class="memory-loading">
+                        🧠 Carregando memórias...
+                    </div>
+
+                </div>
+
+            </section>
+
+        </section>
+
+    </main>
+
+</div>
+
+
+<div
+    id="edit-modal"
+    class="modal hidden"
+>
+
+    <div class="modal-overlay"></div>
+
+    <div class="modal-box">
+
+        <div class="modal-header">
+
+            <div>
+                <h2>Editar memória</h2>
+
+                <p>
+                    Altere as informações armazenadas.
+                </p>
+            </div>
+
+            <button
+                id="close-modal"
+                class="modal-close"
+            >
+                ×
+            </button>
+
+        </div>
+
+
+        <form id="edit-form">
+
+            <input
+                type="hidden"
+                id="edit-id"
+            >
+
+
+            <div class="form-group">
+
+                <label for="edit-memoria">
+                    Memória
+                </label>
+
+                <input
+                    type="text"
+                    id="edit-memoria"
+                    required
+                >
+
+            </div>
+
+
+            <div class="form-row">
+
+                <div class="form-group">
+
+                    <label for="edit-categoria">
+                        Categoria
+                    </label>
+
+                    <select id="edit-categoria">
+
+                        <option value="geral">
+                            Geral
+                        </option>
+
+                        <option value="preferencias">
+                            Preferências
+                        </option>
+
+                        <option value="projetos">
+                            Projetos
+                        </option>
+
+                        <option value="estudos">
+                            Estudos
+                        </option>
+
+                        <option value="tecnologia">
+                            Tecnologia
+                        </option>
+
+                        <option value="outros">
+                            Outros
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="edit-importancia">
+                        Importância
+                    </label>
+
+                    <select id="edit-importancia">
+
+                        <option value="1">⭐</option>
+                        <option value="2">⭐⭐</option>
+                        <option value="3">⭐⭐⭐</option>
+                        <option value="4">⭐⭐⭐⭐</option>
+                        <option value="5">⭐⭐⭐⭐⭐</option>
+
+                    </select>
+
+                </div>
+
+            </div>
+
+
+            <div class="modal-actions">
+
+                <button
+                    type="button"
+                    id="cancel-edit"
+                    class="button-secondary"
+                >
+                    Cancelar
+                </button>
+
+                <button
+                    type="submit"
+                    class="button-primary"
+                >
+                    Salvar alterações
+                </button>
+
+            </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+
+<script src="/static/memorias.js"></script>
+
+</body>
+
+</html>

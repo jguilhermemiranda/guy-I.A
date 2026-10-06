@@ -1,0 +1,17 @@
+[project]
+name = "g-u-y"
+version = "0.1.0"
+description = "Assistente local de desktop com chat de IA, memoria e busca em documentos."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "beautifulsoup4",
+    "chromadb",
+    "ddgs",
+    "flask",
+    "ollama",
+    "pypdf",
+    "pywebview",
+    "python-dotenv",
+    "requests",
+]

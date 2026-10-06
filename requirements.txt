@@ -1,0 +1,9 @@
+Flask
+chromadb
+ollama
+requests
+beautifulsoup4
+pypdf
+ddgs
+pywebview
+python-dotenv

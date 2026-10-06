@@ -1,0 +1,56 @@
+# Python environments and generated files
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Local secrets and configuration
+.env
+.env.*
+!.env.example
+
+# IDE and operating system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs, temporary files, and test/tool caches
+*.log
+*.tmp
+*.temp
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Dados locais e índices gerados durante o uso
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+data/chroma_db/
+
+# Large legacy documents and generated index data are kept locally, not in Git.
+/archive/legacy/guy-copy/chroma_db/
+/archive/legacy/guy-copy/banco de dados/ordem paranormal/Regras/Arquivos-Secretos-02.pdf
+/archive/legacy/guy-copy/banco de dados/ordem paranormal/Regras/Arquivos-Secretos-3-v-1-0.pdf
+/archive/legacy/guy-copy/banco de dados/ordem paranormal/Regras/ordem-paranormal-rpg-v1-3-lyfxjj.pdf
+/archive/legacy/guy-copy/banco de dados/fisica/Isaac Newton - Princípios matemáticos da filosofia natural-Fundação Calouste Gulbenkian (2017).pdf
+/archive/legacy/guy-mara/banco de dados/fisica/Isaac Newton - Princípios matemáticos da filosofia natural-Fundação Calouste Gulbenkian (2017).pdf
+/archive/legacy/guy-mara/chroma_db/
+/data/knowledge/fisica/Isaac Newton - Princípios matemáticos da filosofia natural-Fundação Calouste Gulbenkian (2017).pdf
+
+# Pesos e definicoes locais de modelos; "ollama pull" guarda os modelos fora daqui.
+*.gguf
+*.gguf.*
+Modelfile
+Modelfile.*
