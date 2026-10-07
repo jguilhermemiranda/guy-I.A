@@ -8,3 +8,5 @@ ddgs
 pywebview
 python-dotenv
 faster-whisper
+coqui-tts[codec]==0.27.5
+transformers>=4.57,<5

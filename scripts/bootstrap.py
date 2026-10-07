@@ -1,5 +1,3 @@
-"""Prepara e inicia o G.U.Y. com um unico lancamento no Windows."""
-
 from __future__ import annotations
 
 import hashlib
@@ -20,6 +18,7 @@ VENV_PYTHON = VENV / "Scripts" / "python.exe"
 REQUIREMENTS = ROOT / "requirements.txt"
 DEPENDENCY_MARKER = VENV / ".guy-requirements.sha256"
 OLLAMA_LOG = ROOT / "data" / "logs" / "ollama-serve.log"
+REFERENCIA_VOZ = ROOT / "data" / "voz" / "referencia.wav"
 MODELOS_OLLAMA = (
     "joaoguilhermeomiranda/guy",
     "joaoguilhermeomiranda/fearth",
@@ -41,7 +40,13 @@ def executar(comando: list[str], *, cwd: Path = ROOT) -> None:
 
 
 def hash_requisitos() -> str:
-    return hashlib.sha256(REQUIREMENTS.read_bytes()).hexdigest()
+    try:
+        conteudo = REQUIREMENTS.read_bytes()
+    except OSError as erro:
+        raise PreparacaoFalhou(
+            f"Nao foi possivel ler a lista de dependencias: {REQUIREMENTS}"
+        ) from erro
+    return hashlib.sha256(conteudo).hexdigest()
 
 
 def garantir_ambiente_python() -> None:
@@ -78,11 +83,16 @@ def garantir_ambiente_python() -> None:
 
     if not ambiente_valido:
         status("Criando o ambiente Python isolado...")
-        executar([sys.executable, "-m", "venv", str(VENV)])
+        try:
+            executar([sys.executable, "-m", "venv", str(VENV)])
+        except subprocess.CalledProcessError as erro:
+            raise PreparacaoFalhou(
+                "Nao foi possivel criar o ambiente Python local."
+            ) from erro
 
     try:
         marcador_atual = DEPENDENCY_MARKER.read_text(encoding="ascii")
-    except OSError:
+    except (OSError, UnicodeError):
         marcador_atual = ""
     hash_atual = hash_requisitos()
     if marcador_atual == hash_atual:
@@ -111,6 +121,50 @@ def garantir_ambiente_python() -> None:
     except OSError as erro:
         raise PreparacaoFalhou(
             "Nao foi possivel concluir a instalacao das dependencias Python."
+        ) from erro
+
+
+def garantir_dependencia_voz() -> None:
+    if not REFERENCIA_VOZ.is_file():
+        return
+
+    status("Verificando o mecanismo da voz salva...")
+    verificacao = verificar_importacao_voz()
+    if verificacao.returncode:
+        saidas = (verificacao.stdout, verificacao.stderr)
+        detalhe = "\n".join(saida.strip() for saida in saidas if saida.strip())
+        detalhe = detalhe[-1_500:]
+        raise PreparacaoFalhou(
+            "A dependencia da voz continua sem carregar no ambiente do G.U.Y. "
+            f"Python: {VENV_PYTHON}. Erro de importacao: "
+            f"{detalhe or 'causa nao informada'}"
+        )
+
+
+def verificar_importacao_voz() -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            [
+                str(VENV_PYTHON),
+                "-c",
+                (
+                    "from app.voz import preparar_dependencia_voz; "
+                    "preparar_dependencia_voz()"
+                ),
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=1_920,
+        )
+    except subprocess.TimeoutExpired as erro:
+        raise PreparacaoFalhou(
+            "A preparacao/verificacao da dependencia de voz excedeu 32 minutos."
+        ) from erro
+    except OSError as erro:
+        raise PreparacaoFalhou(
+            f"Nao foi possivel verificar a dependencia de voz: {erro}"
         ) from erro
 
 
@@ -143,6 +197,7 @@ def instalar_ollama() -> str:
             "--id",
             "Ollama.Ollama",
             "--exact",
+            "--silent",
             "--accept-source-agreements",
             "--accept-package-agreements",
         ])
@@ -244,6 +299,7 @@ def iniciar_aplicativo() -> int:
 def main() -> int:
     try:
         garantir_ambiente_python()
+        garantir_dependencia_voz()
         ollama = encontrar_ollama() or instalar_ollama()
         garantir_servidor_ollama(ollama)
         garantir_modelos_ollama(ollama)

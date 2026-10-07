@@ -7,6 +7,7 @@ import webview
 from werkzeug.serving import make_server
 
 from .api import app
+from .voz import REFERENCIA_VOZ, preparar_dependencia_voz
 
 
 HOST = "127.0.0.1"
@@ -14,6 +15,8 @@ HOST = "127.0.0.1"
 
 def main() -> None:
     """Abre o servidor local e o exibe em uma janela nativa do Windows."""
+    if REFERENCIA_VOZ.is_file():
+        preparar_dependencia_voz()
     servidor = make_server(HOST, 0, app, threaded=True)
     porta = servidor.server_port
     thread = threading.Thread(target=servidor.serve_forever, daemon=True)
