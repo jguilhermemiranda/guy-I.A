@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debate estruturado · G.U.Y.</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="debate-page">
+    <header class="debate-nav">
+        <a class="back-link" href="/">← Voltar ao chat</a>
+        <strong>G.U.Y. · Debate estruturado</strong>
+    </header>
+    <main class="debate-layout">
+        <aside class="debate-history" aria-label="Debates anteriores">
+            <h2>Debates anteriores</h2>
+            <div id="debate-history-list" class="debate-history-list"></div>
+            <p id="debate-search-capability" class="settings-help"></p>
+        </aside>
+
+        <section class="debate-main">
+            <section id="debate-config-panel" class="debate-config-panel">
+                <p class="eyebrow">NOVA SESSÃO</p>
+                <h1>Configure o debate</h1>
+                <p class="debate-example">Defina pelo menos dois lados; adicione quantos participantes forem necessários e escolha uma posição para cada um.</p>
+                <form id="debate-config-form">
+                    <label for="debate-theme">Tema</label>
+                    <input id="debate-theme" name="tema" required maxlength="500" placeholder="Ex.: Qual gênero musical possui maior impacto cultural?">
+                    <div class="debate-form-grid">
+                        <div>
+                            <label for="debate-rounds">Rodadas</label>
+                            <input id="debate-rounds" name="rodadas" type="number" min="1" max="10" value="3" required>
+                        </div>
+                        <div>
+                            <label for="debate-first">Quem começa</label>
+                            <select id="debate-first" name="participante_inicial"></select>
+                        </div>
+                        <div>
+                            <label for="debate-words">Palavras por fala</label>
+                            <input id="debate-words" name="limite_palavras_por_fala" type="number" min="50" max="500" value="180" required>
+                        </div>
+                    </div>
+                    <div id="debate-participants" class="debate-participant-list"></div>
+                    <button id="debate-add-side" class="button-secondary" type="button">Adicionar lado</button>
+                    <p class="settings-help">Cada lado pode ter nome e posição próprios; por enquanto, os modelos disponíveis para representá-los são Guy e Fearth.</p>
+                    <label for="debate-rules">Regras adicionais (opcional)</label>
+                    <textarea id="debate-rules" name="regras" rows="3" maxlength="2000" placeholder="Defina limites ou critérios para o debate."></textarea>
+                    <label class="debate-check-row">
+                        <input id="debate-change-position" name="permite_mudar_posicao" type="checkbox">
+                        <span>Permitir mudança de posição</span>
+                    </label>
+                    <label class="debate-check-row">
+                        <input id="debate-research" name="pesquisa" type="checkbox" disabled>
+                        <span>Permitir pesquisa antes das falas</span>
+                    </label>
+                    <p id="debate-research-note" class="settings-help"></p>
+                    <p id="debate-form-error" class="debate-error" role="alert"></p>
+                    <button id="debate-start" class="button-primary" type="submit">Iniciar debate</button>
+                </form>
+            </section>
+
+            <section id="debate-session-panel" class="debate-session-panel" hidden>
+                <header class="debate-session-header">
+                    <p class="eyebrow">DEBATE</p>
+                    <h1 id="debate-session-theme"></h1>
+                    <p id="debate-round-label" class="debate-round-label"></p>
+                    <div id="debate-sides" class="debate-sides"></div>
+                    <p id="debate-session-status" class="debate-session-status" role="status"></p>
+                    <p id="debate-current-speaker"></p>
+                    <div id="debate-controls" class="debate-controls"></div>
+                </header>
+                <div id="debate-transcript" class="debate-transcript" aria-live="polite"></div>
+                <section id="debate-summary-panel" class="debate-summary-panel" hidden>
+                    <h2>Resumo do moderador</h2>
+                    <p id="debate-summary-error" class="debate-error"></p>
+                    <div id="debate-summary-text" class="debate-summary-text"></div>
+                </section>
+            </section>
+        </section>
+    </main>
+    <script src="{{ url_for('static', filename='debate.js') }}"></script>
+</body>
+</html>

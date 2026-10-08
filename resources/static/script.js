@@ -17,6 +17,11 @@ const temperatureSlider = document.querySelector('#temperature-slider');
 const temperatureValue = document.querySelector('#temperature-value');
 const voiceInput = document.querySelector('#voice-input');
 const voiceStatus = document.querySelector('#voice-status');
+const contextToggle = document.querySelector('#context-toggle');
+const contextToggleLabel = document.querySelector('#context-toggle-label');
+const contextToggleIcon = document.querySelector('#context-toggle-icon');
+const contextDescription = document.querySelector('#context-description');
+const contextStatus = document.querySelector('#context-status');
 const DEFAULT_TEMPERATURE = 0.2;
 
 const agents = {
@@ -26,6 +31,8 @@ const agents = {
 };
 let currentAgent = localStorage.getItem('guy_agente') || 'guy';
 let voicePreferences = { falar_respostas: false, voz: '', idioma: 'pt-BR' };
+let contextEnabled = true;
+let contextPreferenceLoaded = false;
 let recorder = null;
 let recordedChunks = [];
 let microphoneStream = null;
@@ -53,6 +60,21 @@ if (temperatureSlider) {
 
 function scrollToBottom() { messages.scrollTop = messages.scrollHeight; }
 function setVoiceStatus(message, error = false) { if (!voiceStatus) return; voiceStatus.textContent = message; voiceStatus.classList.toggle('error', error); }
+function setContextStatus(message, error = false) {
+  if (!contextStatus) return;
+  contextStatus.textContent = message;
+  contextStatus.classList.toggle('error', error);
+}
+
+function updateContextToggle() {
+  if (!contextToggle) return;
+  contextToggle.setAttribute('aria-pressed', String(contextEnabled));
+  contextToggleLabel.textContent = `Contexto ${contextEnabled ? 'ON' : 'OFF'}`;
+  contextToggleIcon.textContent = contextEnabled ? '◉' : '○';
+  contextDescription.textContent = contextEnabled
+    ? 'Inclui trechos relevantes da conversa'
+    : 'Só mensagem atual e memória persistente';
+}
 
 function speak(text) {
   if (!voicePreferences.falar_respostas || !text) return;
@@ -179,12 +201,47 @@ async function transcribeRecordedAudio() {
 }
 
 async function loadVoicePreferences() {
+  setContextStatus('Carregando modo de contexto…');
   try {
     const response = await fetch('/api/perfil');
-    if (!response.ok) return;
+    if (!response.ok) throw new Error('Não foi possível carregar as preferências do perfil.');
     const profile = await response.json();
+    if (typeof profile.preferencias?.contexto_habilitado !== 'boolean') {
+      throw new Error('A preferência de contexto retornada pelo perfil é inválida.');
+    }
     voicePreferences = { ...voicePreferences, ...(profile.preferencias || {}) };
-  } catch (_) { /* A conversa funciona normalmente sem as preferências. */ }
+    contextEnabled = profile.preferencias.contexto_habilitado;
+    contextPreferenceLoaded = true;
+    updateContextToggle();
+    contextToggle.disabled = false;
+    setContextStatus('');
+  } catch (error) {
+    setContextStatus(`${error.message} Recarregue a tela antes de enviar mensagens.`, true);
+  }
+}
+
+async function toggleContextMode() {
+  if (!contextToggle || contextToggle.disabled) return;
+  const requested = !contextEnabled;
+  contextToggle.disabled = true;
+  setContextStatus('Salvando preferência de contexto…');
+  try {
+    const response = await fetch('/api/perfil', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preferencias: { contexto_habilitado: requested } })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.detail || 'Não foi possível salvar o modo de contexto.');
+    contextEnabled = data.preferencias?.contexto_habilitado ?? requested;
+    contextPreferenceLoaded = true;
+    updateContextToggle();
+    setContextStatus('Preferência salva; vale a partir da próxima mensagem.');
+  } catch (error) {
+    setContextStatus(error.message, true);
+  } finally {
+    contextToggle.disabled = false;
+  }
 }
 function escapeHtml(value) { const el = document.createElement('div'); el.textContent = String(value || ''); return el.innerHTML; }
 function toText(value) { return escapeHtml(value).replace(/\n/g, '<br>'); }
@@ -308,11 +365,15 @@ async function removeKnowledgeFile(file, button) {
 async function sendMessage() {
   const text = input.value.trim();
   if (!text || send.disabled) return;
+  if (!contextPreferenceLoaded) {
+    setContextStatus('O modo de contexto ainda não foi carregado. Recarregue a tela e tente novamente.', true);
+    return;
+  }
   document.querySelector('#welcome')?.remove();
   addMessage(text, 'user');
   input.value = ''; autoGrow(); setLoading(true);
   try {
-    const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mensagem: text, agente: currentAgent, temperatura: getTemperatureValue() }) });
+    const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mensagem: text, agente: currentAgent, temperatura: getTemperatureValue(), contexto_habilitado: contextEnabled }) });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.detail || data.erro || 'Não foi possível processar a mensagem.');
     if (data.modo === 'debate') { addDebate(data); speak(data.conclusao); }
@@ -322,8 +383,24 @@ async function sendMessage() {
 }
 
 selectorButton.addEventListener('click', event => { event.stopPropagation(); const open = menu.classList.toggle('open'); selectorButton.setAttribute('aria-expanded', String(open)); });
-document.querySelectorAll('.agent-option').forEach(option => option.addEventListener('click', () => { if (send.disabled) return; currentAgent = option.dataset.agent; localStorage.setItem('guy_agente', currentAgent); menu.classList.remove('open'); selectorButton.setAttribute('aria-expanded', 'false'); updateAgentInterface(); showWelcome(); input.value = ''; autoGrow(); input.focus(); }));
+document.querySelectorAll('.agent-option').forEach(option => option.addEventListener('click', () => {
+  if (send.disabled) return;
+  if (option.dataset.agent === 'debate') {
+    window.location.href = '/debate';
+    return;
+  }
+  currentAgent = option.dataset.agent;
+  localStorage.setItem('guy_agente', currentAgent);
+  menu.classList.remove('open');
+  selectorButton.setAttribute('aria-expanded', 'false');
+  updateAgentInterface();
+  showWelcome();
+  input.value = '';
+  autoGrow();
+  input.focus();
+}));
 document.addEventListener('click', event => { if (!selector.contains(event.target)) { menu.classList.remove('open'); selectorButton.setAttribute('aria-expanded', 'false'); } });
+contextToggle?.addEventListener('click', toggleContextMode);
 send.addEventListener('click', sendMessage);
 temperatureSlider?.addEventListener('input', updateTemperatureLabel);
 input.addEventListener('input', autoGrow);

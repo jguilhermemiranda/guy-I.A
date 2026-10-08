@@ -25,6 +25,7 @@ PADRAO_PREFERENCIAS = {
     "voz": "",
     "usar_voz_personalizada": False,
     "falar_respostas": False,
+    "contexto_habilitado": True,
 }
 CHAVES_PREFERENCIAS = set(PADRAO_PREFERENCIAS)
 
@@ -145,6 +146,11 @@ def atualizar_perfil(usuario_id, dados):
     recebidas = dados.get("preferencias", {})
     if not isinstance(recebidas, dict):
         recebidas = {}
+    if (
+        "contexto_habilitado" in recebidas
+        and not isinstance(recebidas["contexto_habilitado"], bool)
+    ):
+        raise ValueError("O modo de contexto precisa ser verdadeiro ou falso.")
     preferencias = {**perfil_atual["preferencias"]}
     for chave in CHAVES_PREFERENCIAS:
         if chave in recebidas:
@@ -155,6 +161,7 @@ def atualizar_perfil(usuario_id, dados):
     preferencias["voz"] = _texto_limitado(preferencias["voz"], 200)
     preferencias["usar_voz_personalizada"] = bool(preferencias["usar_voz_personalizada"])
     preferencias["falar_respostas"] = bool(preferencias["falar_respostas"])
+    preferencias["contexto_habilitado"] = bool(preferencias["contexto_habilitado"])
     with conectar() as conexao:
         conexao.execute("""
             INSERT INTO perfis (

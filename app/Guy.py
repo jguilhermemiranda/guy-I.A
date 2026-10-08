@@ -1,6 +1,9 @@
 from pathlib import Path
 import hashlib
+import json
+import logging
 import re
+import unicodedata
 from urllib.parse import urlparse
 
 import chromadb
@@ -39,6 +42,11 @@ MODELO_FEARTH = "joaoguilhermeomiranda/fearth"
 MODELO_EMBEDDING = "nomic-embed-text"
 
 COLECAO = "guy_conhecimento"
+CONFIGURACAO_CONTEXTO = {
+    "historico_limite": 4,
+    "limiar_relevancia": 0.25,
+    "limiar_duplicacao": 0.8,
+}
 
 TAMANHO_CHUNK = 1200
 SOBREPOSICAO = 200
@@ -59,6 +67,7 @@ USER_AGENT = (
 )
 
 historicos = {}
+_LOGGER = logging.getLogger(__name__)
 
 TEMPERATURA_PADRAO_GUY = 0.2
 TEMPERATURA_PADRAO_FEARTH = 0.1
@@ -567,7 +576,7 @@ def chamou_fearth(pergunta):
     return any(termo in pergunta_normalizada for termo in termos)
 
 
-def consultar_fearth(pergunta, historico, contexto, contexto_web, temperatura=None):
+def consultar_fearth(pergunta, montagem_contexto, temperatura=None):
     prompt = f"""
 Você é Fearth-IA, um agente independente que está sendo consultado por Guy.
 
@@ -575,18 +584,7 @@ Responda diretamente à solicitação abaixo em português brasileiro.
 Não finja ser Guy e não escreva falas de Guy.
 Não diga que você foi consultada se não puder analisar o conteúdo.
 Não invente fontes, fatos ou resultados de pesquisa.
-
-HISTÓRICO RECENTE:
-{historico or "Sem histórico recente."}
-
-BANCO LOCAL:
-{contexto}
-
-INTERNET:
-{contexto_web}
-
-SOLICITAÇÃO DO USUÁRIO:
-{pergunta}
+Responda à mensagem atual delimitada; o contexto auxiliar pode não se aplicar.
 """.strip()
 
     try:
@@ -594,9 +592,10 @@ SOLICITAÇÃO DO USUÁRIO:
             model=MODELO_FEARTH,
             messages=[
                 {
-                    "role": "user",
+                    "role": "system",
                     "content": prompt
-                }
+                },
+                {"role": "user", "content": montagem_contexto["prompt"]},
             ],
             options=opcoes_modelo("fearth", temperatura)
         )
@@ -782,17 +781,334 @@ def salvar_memorias_relevantes(username, mensagem):
     return fatos
 
 
+_STOPWORDS = {
+    "a", "ao", "aos", "as", "com", "como", "da", "das", "de", "dela",
+    "dele", "deles", "do", "dos", "e", "ela", "ele", "em", "essa",
+    "essas", "esse", "esses", "esta", "estas", "este", "estes", "eu",
+    "foi", "isso", "isto", "ja", "lhe", "mais", "mas", "me", "meu",
+    "minha", "muito", "na", "nas", "no", "nos", "o", "os", "ou",
+    "para", "pela", "pelas", "pelo", "pelos", "por", "qual", "quando",
+    "que", "quem", "se", "sem", "ser", "sua", "suas", "tambem", "te",
+    "tem", "um", "uma", "voce",
+}
+_SUFIXOS_SIMPLES = (
+    "amentos", "imentos", "acoes", "adoras", "adores", "mente", "idades",
+    "amento", "imento", "acao", "adora", "ador", "antes", "ancia",
+    "encia", "idade", "ando", "endo", "indo", "ados", "adas", "idos",
+    "idas", "es", "os", "as", "s",
+)
+_FOLLOW_UP_PATTERNS = (
+    r"\bexplique\s+melhor\b",
+    r"\bcontinue\b",
+    r"\be\s+a\s+terceira\b",
+    r"\be\s+a\s+proxima\b",
+    r"\bconverta\b",
+    r"\bmelhore\b",
+    r"\bdetalhe\b",
+    r"\bexplica\s+melhor\b",
+    r"\bmais\s+claro\b",
+    r"\b(isso|disso|nisso|aquilo|daquilo)\b",
+)
+_FOLLOW_UP_SHORT_TOKENS = {
+    "sim", "nao", "mais", "qual", "porque", "por", "exemplo", "outra",
+    "outro", "segunda", "terceira", "quarta", "continue",
+}
+
+
+def _normalizar_token(token):
+    token = "".join(
+        caractere for caractere in unicodedata.normalize("NFD", token)
+        if unicodedata.category(caractere) != "Mn"
+    )
+    if token in _STOPWORDS or len(token) < 2:
+        return ""
+
+    for sufixo in _SUFIXOS_SIMPLES:
+        if token.endswith(sufixo) and len(token) - len(sufixo) >= 3:
+            return token[:-len(sufixo)]
+    return token
+
+
+def _tokenizar_texto(texto):
+    texto = str(texto or "").lower()
+    texto = re.sub(r"https?://\S+", " ", texto)
+    tokens = re.findall(r"[a-z0-9À-ÿ]+", texto)
+    return [normalizado for token in tokens if (normalizado := _normalizar_token(token))]
+
+
+def _texto_mensagem(item):
+    if isinstance(item, dict):
+        return str(item.get("content", ""))
+    return str(item)
+
+
+def _mensagem_role(item):
+    return item.get("role", "user") if isinstance(item, dict) else "user"
+
+
+def _chave_turno(item):
+    return " ".join(_tokenizar_texto(_texto_mensagem(item)))
+
+
+def _turno_repetido(tokens, anteriores, limiar=0.8):
+    atuais = set(tokens)
+    if not atuais:
+        return False
+    for anterior in anteriores:
+        if abs(len(atuais) - len(anterior)) > 1:
+            continue
+        uniao = atuais | anterior
+        similaridade = len(atuais & anterior) / len(uniao) if uniao else 0.0
+        if similaridade >= limiar:
+            return True
+    return False
+
+
+def _mensagem_follow_up(texto, tokens):
+    sem_acentos = "".join(
+        caractere for caractere in unicodedata.normalize("NFD", str(texto).lower())
+        if unicodedata.category(caractere) != "Mn"
+    )
+    sem_acentos = " ".join(re.findall(r"[a-z0-9]+", sem_acentos))
+    normalizado = " ".join(_tokenizar_texto(texto))
+    tem_referencia = any(
+        re.search(padrao, normalizado)
+        for padrao in _FOLLOW_UP_PATTERNS
+    ) or any(
+        re.search(padrao, sem_acentos)
+        for padrao in (
+            r"\be\s+a\s+terceira\b",
+            r"\bconverta\b",
+            r"\bexplique\s+melhor\b",
+            r"\bcontinue\b",
+            r"\b(isso|disso|nisso|aquilo|daquilo)\b",
+        )
+    )
+    return tem_referencia or (
+        len(tokens) <= 3
+        and bool(set(tokens) & _FOLLOW_UP_SHORT_TOKENS)
+    )
+
+
+def selecionar_historico_relevante(
+    pergunta,
+    historico,
+    limite=4,
+    limiar=0.25,
+    limiar_duplicacao=0.8,
+):
+    """Seleciona candidatos por sobreposição lexical; repetições não somam peso."""
+    if not historico:
+        return []
+
+    tokens_pergunta = set(_tokenizar_texto(pergunta))
+    follow_up = _mensagem_follow_up(str(pergunta or ""), tokens_pergunta)
+    if not tokens_pergunta:
+        return list(historico[-2:]) if follow_up else []
+
+    pontuados = []
+    turnos_vistos = []
+    ignorar_resposta_duplicada = False
+    for indice, item in enumerate(historico):
+        role = _mensagem_role(item)
+
+        if role == "user":
+            tokens_turno = _tokenizar_texto(_texto_mensagem(item))
+            ignorar_resposta_duplicada = _turno_repetido(
+                tokens_turno,
+                turnos_vistos,
+                limiar=limiar_duplicacao,
+            )
+            if tokens_turno:
+                turnos_vistos.append(set(tokens_turno))
+        elif ignorar_resposta_duplicada:
+            continue
+
+        tokens_item = set(_tokenizar_texto(_texto_mensagem(item)))
+        intersecao = tokens_pergunta & tokens_item
+        score = len(intersecao) / len(tokens_pergunta) if tokens_item else 0.0
+        pontuados.append((indice, item, score, ignorar_resposta_duplicada))
+
+    selecionados = []
+    if follow_up:
+        selecionados = list(historico[-min(2, len(historico)):])
+    else:
+        distintos = set()
+        candidatos = []
+        for indice, item, score, duplicado in pontuados:
+            if duplicado:
+                continue
+            chave = _chave_turno(item)
+            if chave and chave in distintos:
+                continue
+            if chave:
+                distintos.add(chave)
+            if score >= limiar:
+                candidatos.append((score, indice, item))
+        candidatos.sort(key=lambda registro: (-registro[0], -registro[1]))
+        selecionados = [
+            item for _, _, item in sorted(candidatos[:max(0, limite)], key=lambda r: r[1])
+        ]
+
+    return selecionados
+
+
+def montar_prompt_contexto(
+    mensagem,
+    historico,
+    memoria,
+    modo=True,
+    configuracao=None,
+    contexto_adicional=None,
+    contexto_da_tarefa=None,
+):
+    """Monta o prompt contextual de forma determinística e sem I/O."""
+    configuracao = {
+        **CONFIGURACAO_CONTEXTO,
+        **(configuracao or {}),
+    }
+    modo = bool(modo)
+    limiar = float(configuracao["limiar_relevancia"])
+    limite = int(configuracao["historico_limite"])
+    historico = list(historico or [])
+    pergunta = str(mensagem or "").strip()
+    pergunta_tokens = set(_tokenizar_texto(pergunta))
+    follow_up = _mensagem_follow_up(pergunta, pergunta_tokens)
+    historico_relevante = (
+        selecionar_historico_relevante(
+            pergunta,
+            historico,
+            limite=limite,
+            limiar=limiar,
+            limiar_duplicacao=float(configuracao["limiar_duplicacao"]),
+        )
+        if modo else []
+    )
+    selecionados_ids = {id(item) for item in historico_relevante}
+    decisoes = []
+    vistos = []
+    duplicados = set()
+    for indice, item in enumerate(historico):
+        role = _mensagem_role(item)
+        chave = _chave_turno(item)
+        texto = _texto_mensagem(item)
+        score = (
+            len(pergunta_tokens & set(_tokenizar_texto(texto))) / len(pergunta_tokens)
+            if pergunta_tokens else 0.0
+        )
+        duplicado = False
+        if role == "user" and chave:
+            tokens_turno = _tokenizar_texto(texto)
+            duplicado = _turno_repetido(
+                tokens_turno,
+                vistos,
+                limiar=float(configuracao["limiar_duplicacao"]),
+            )
+            if tokens_turno:
+                vistos.append(set(tokens_turno))
+            if duplicado:
+                duplicados.add(indice)
+                if (
+                    indice + 1 < len(historico)
+                    and _mensagem_role(historico[indice + 1]) == "assistant"
+                ):
+                    duplicados.add(indice + 1)
+        incluido = id(item) in selecionados_ids and indice not in duplicados
+        if not modo:
+            motivo = "contexto desativado"
+        elif indice in duplicados:
+            motivo = "turno repetido; não aumenta a relevância"
+        elif incluido and follow_up:
+            motivo = "follow-up; mínimo do turno anterior"
+        elif incluido:
+            motivo = "score acima do limiar"
+        elif score < limiar:
+            motivo = "score abaixo do limiar"
+        else:
+            motivo = "reservatório não selecionado pelo limite"
+        decisoes.append({
+            "indice": indice,
+            "incluido": bool(incluido),
+            "motivo": motivo,
+            "score": round(score, 4),
+        })
+
+    memoria_texto = str(memoria or "").strip()
+    secoes = [
+        "CONTEXTO AUXILIAR — pode não se aplicar; o assunto é a mensagem atual.",
+        "Use o contexto auxiliar apenas quando ele for aplicável à mensagem atual.",
+    ]
+    if modo and historico_relevante:
+        secoes.append(
+            "CONTEXTO RELEVANTE DA CONVERSA\n"
+            + montar_historico_texto(historico_relevante)
+        )
+    if modo:
+        for rotulo, conteudo in (contexto_adicional or {}).items():
+            conteudo = str(conteudo or "").strip()
+            if conteudo:
+                secoes.append(f"{rotulo}\n{conteudo}")
+    for rotulo, conteudo in (contexto_da_tarefa or {}).items():
+        conteudo = str(conteudo or "").strip()
+        if conteudo:
+            secoes.append(f"{rotulo}\n{conteudo}")
+    if memoria_texto:
+        secoes.append(
+            "MEMÓRIA PERSISTENTE DO USUÁRIO\n"
+            "São fatos duráveis, não o assunto presumido da conversa.\n"
+            + memoria_texto
+        )
+    secoes.extend([
+        "MENSAGEM ATUAL DO USUÁRIO (define o assunto; responda a esta mensagem)\n"
+        f"<<<INÍCIO>>>\n{pergunta}\n<<<FIM>>>",
+    ])
+    return {
+        "mensagem_atual": pergunta,
+        "historico": historico_relevante,
+        "historico_texto": montar_historico_texto(historico_relevante),
+        "memoria": memoria_texto,
+        "decisoes": decisoes,
+        "modo": modo,
+        "prompt": "\n\n".join(secoes),
+    }
+
+
+def registrar_decisao_contexto(logger, montagem, agente):
+    if logger.getEffectiveLevel() > logging.INFO:
+        logger.setLevel(logging.INFO)
+    logger.info(
+        "Decisão de contexto: %s",
+        json.dumps({
+            "agente": agente,
+            "modo": montagem["modo"],
+            "considerados": len(montagem["decisoes"]),
+            "incluidos": sum(decisao["incluido"] for decisao in montagem["decisoes"]),
+            "excluidos": sum(not decisao["incluido"] for decisao in montagem["decisoes"]),
+            "decisoes": montagem["decisoes"],
+        }, ensure_ascii=False),
+    )
+
+
 def montar_historico_texto(historico):
     partes = []
 
-    for mensagem in historico[-6:]:
-        nome = "Usuário" if mensagem["role"] == "user" else "Guy"
-        partes.append(f"{nome}: {mensagem['content']}")
+    for mensagem in historico:
+        if isinstance(mensagem, dict):
+            nome = "Usuário" if mensagem.get("role") == "user" else "Guy"
+            partes.append(f"{nome}: {mensagem.get('content', '')}")
+        else:
+            partes.append(f"Mensagem: {mensagem}")
 
     return "\n".join(partes)
 
 
-def processar_mensagem(usuario, pergunta, agente="guy", temperatura=None):
+def processar_mensagem(
+    usuario,
+    pergunta,
+    agente="guy",
+    temperatura=None,
+    contexto_habilitado=True,
+):
     username = usuario["username"]
     agente = str(agente).strip().lower()
 
@@ -804,41 +1120,58 @@ def processar_mensagem(usuario, pergunta, agente="guy", temperatura=None):
 
     historico = historicos[username]
     perfil = obter_perfil(username)
+
+    contexto = ""
+    contexto_web = ""
+    if contexto_habilitado:
+        try:
+            collection = obter_colecao()
+            resultados = buscar_conhecimento(collection, pergunta)
+            contexto = construir_contexto(resultados)
+        except Exception as erro:
+            print(f"{AMARELO}Aviso no RAG: {erro}{RESET}")
+            contexto = "O banco local não está disponível nesta mensagem."
+
+        contexto_web = "A internet não foi consultada nesta mensagem."
+        if precisa_internet(pergunta):
+            consulta_web = preparar_busca_web(pergunta)
+            resultados_web = pesquisar_web(consulta_web)
+            contexto_web = construir_contexto_web(resultados_web)
     try:
-        contexto_perfil = construir_contexto_perfil(username)
+        contexto_perfil = (
+            construir_contexto_perfil(username) if contexto_habilitado else ""
+        )
     except Exception as erro:
         print(f"{AMARELO}Aviso no perfil técnico: {erro}{RESET}")
         contexto_perfil = "O perfil técnico não está disponível nesta mensagem."
 
     try:
-        collection = obter_colecao()
-        resultados = buscar_conhecimento(collection, pergunta)
-        contexto = construir_contexto(resultados)
-    except Exception as erro:
-        print(f"{AMARELO}Aviso no RAG: {erro}{RESET}")
-        contexto = "O banco local não está disponível nesta mensagem."
-
-    resultados_web = []
-    contexto_web = "A internet não foi consultada nesta mensagem."
-
-    if precisa_internet(pergunta):
-        consulta_web = preparar_busca_web(pergunta)
-        resultados_web = pesquisar_web(consulta_web)
-        contexto_web = construir_contexto_web(resultados_web)
-
-    try:
         memorias = construir_contexto_memoria(username)
-    except Exception:
-        memorias = "Nenhuma memória disponível."
+    except Exception as erro:
+        _LOGGER.exception("Falha ao carregar a memória persistente: %s", erro)
+        memorias = "A memória persistente não está disponível nesta mensagem."
 
-    historico_texto = montar_historico_texto(historico)
+    contexto_adicional = {
+        "INFORMAÇÕES PERMANENTES DO USUÁRIO": (
+            f"Username (identificador): {usuario['username']}\nTipo: {usuario['tipo']}"
+        ),
+        "BANCO LOCAL": contexto,
+        "INTERNET": contexto_web,
+        "PERFIL TÉCNICO E FONTES PÚBLICAS DO USUÁRIO": contexto_perfil,
+    }
+    contexto_prompt = montar_prompt_contexto(
+        pergunta,
+        historico,
+        memorias,
+        modo=contexto_habilitado,
+        contexto_adicional=contexto_adicional,
+    )
 
     if agente == "fearth":
+        registrar_decisao_contexto(_LOGGER, contexto_prompt, agente)
         resposta = consultar_fearth(
             pergunta,
-            historico_texto,
-            contexto,
-            contexto_web,
+            contexto_prompt,
             temperatura=temperatura
         )
 
@@ -858,15 +1191,14 @@ def processar_mensagem(usuario, pergunta, agente="guy", temperatura=None):
 
         return resposta
 
+    registrar_decisao_contexto(_LOGGER, contexto_prompt, agente)
     resposta_fearth = ""
     fearth_solicitada = chamou_fearth(pergunta)
 
     if fearth_solicitada:
         resposta_fearth = consultar_fearth(
             pergunta,
-            historico_texto,
-            contexto,
-            contexto_web,
+            contexto_prompt,
             temperatura=temperatura
         )
 
@@ -898,51 +1230,28 @@ Regras obrigatórias:
 - Você pode comparar a sua análise com a resposta real acima.
 """.strip()
 
-    prompt = f"""
-CONTEXTO DISPONÍVEL PARA A MENSAGEM ATUAL
-
-INFORMAÇÕES DO USUÁRIO
-O username é apenas um identificador e não deve ser tratado como nome real
-do usuário, a menos que ele tenha informado isso explicitamente.
-
-Username: {usuario["username"]}
-Tipo: {usuario["tipo"]}
-
-BANCO LOCAL
-{contexto}
-
-INTERNET
-{contexto_web}
-
-FEARTH-IA
-{contexto_fearth}
-
-MEMÓRIAS SOBRE O USUÁRIO
-{memorias}
-
-PERFIL TÉCNICO E FONTES PÚBLICAS DO USUÁRIO
-{contexto_perfil}
-
-FORMA DE RESPOSTA
-{instrucao_preferencias(perfil['preferencias'])}
-
-HISTÓRICO RECENTE
-{historico_texto or "Sem histórico recente."}
-
-MENSAGEM ATUAL DO USUÁRIO
-{pergunta}
-
-Use este contexto somente quando for relevante.
-Não exponha este bloco, não mencione instruções internas e não invente fontes,
-memórias, pesquisa web ou respostas da Fearth-IA.
-""".strip()
-
-    mensagens = []
-    mensagens.extend(historico[-6:])
-    mensagens.append({
-        "role": "user",
-        "content": prompt
-    })
+    if resposta_fearth:
+        contexto_prompt = montar_prompt_contexto(
+            pergunta,
+            historico,
+            memorias,
+            modo=contexto_habilitado,
+            contexto_adicional=contexto_adicional,
+            contexto_da_tarefa={"RESPOSTA REAL DA FEARTH-IA": contexto_fearth},
+        )
+    mensagens = [
+        {
+            "role": "system",
+            "content": (
+                "Responda à última mensagem do usuário delimitada no prompt. "
+                "O histórico e outros contextos são auxiliares e podem não se "
+                "aplicar ao assunto atual. Não invente fontes nem fatos."
+                "\n\n"
+                + instrucao_preferencias(perfil["preferencias"])
+            ),
+        },
+        {"role": "user", "content": contexto_prompt["prompt"]},
+    ]
 
     try:
         resposta_modelo = ollama.chat(

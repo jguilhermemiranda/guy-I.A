@@ -11,6 +11,7 @@
         <aside class="sidebar">
             <div class="logo"><div class="logo-icon"><img src="/static/img/guy.png" alt="Guy"></div><span>Guy</span></div>
             <button class="new-chat" id="new-chat" type="button">＋ Nova conversa</button>
+            <button class="sidebar-button debate-link" type="button" onclick="window.location.href='/debate'">⚔️ Debate estruturado</button>
             <p class="sidebar-section">CONVERSA ATUAL</p>
             <div class="conversations"><div class="conversation active"><span>💬</span><span id="conversation-title">Nova conversa</span></div></div>
             <div class="sidebar-bottom">
@@ -32,11 +33,20 @@
                     <div class="agent-menu" id="agent-menu" role="menu">
                         <button class="agent-option active guy" data-agent="guy" type="button"><img src="/static/img/guy.png" alt=""><span><strong>Guy</strong><small>Agente principal</small></span><b>✓</b></button>
                         <button class="agent-option fearth" data-agent="fearth" type="button"><img src="/static/img/guy%20(2).png" alt=""><span><strong>Fearth</strong><small>Agente independente</small></span><b>✓</b></button>
-                        <button class="agent-option debate" data-agent="debate" type="button"><span class="mode-icon">⚔️</span><span><strong>Debate</strong><small>Guy × Fearth</small></span><b>✓</b></button>
+                        <button class="agent-option debate" data-agent="debate" type="button"><span class="mode-icon">⚔️</span><span><strong>Debate estruturado</strong><small>Sessão com rodadas</small></span><b>↗</b></button>
                     </div>
                 </div>
+                <button class="context-toggle" id="context-toggle" type="button"
+                    aria-pressed="true" aria-describedby="context-description" disabled>
+                    <span class="context-toggle-icon" id="context-toggle-icon" aria-hidden="true">◉</span>
+                    <span class="context-toggle-copy">
+                        <strong class="context-toggle-label" id="context-toggle-label">Contexto ON</strong>
+                        <small id="context-description">Inclui trechos relevantes da conversa</small>
+                    </span>
+                </button>
                 <span class="status"><i></i> Online</span>
             </header>
+            <p class="context-status" id="context-status" role="status" aria-live="polite"></p>
 
             <section class="messages" id="messages" aria-live="polite">
                 <div class="welcome" id="welcome">

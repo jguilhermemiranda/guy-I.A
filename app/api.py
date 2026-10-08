@@ -8,6 +8,7 @@ from flask import Flask, jsonify, render_template, request, send_file
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
+from . import Guy as GuyModule
 from .Guy import (
     BANCO_DIR,
     historicos,
@@ -18,8 +19,14 @@ from .Guy import (
     processar_mensagem,
     remover_documento,
 )
+from .debate import (
+    CONFIGURACAO as CONFIGURACAO_DEBATE,
+    DebateError,
+    DebateService,
+)
 from .memoria import (
     adicionar_memoria,
+    construir_contexto_memoria,
     criar_banco_memoria,
     editar_memoria,
     listar_memorias,
@@ -47,10 +54,8 @@ MODELO_GUY = "joaoguilhermeomiranda/guy"
 MODELO_FEARTH = "joaoguilhermeomiranda/fearth"
 AGENTES_VALIDOS = {"guy", "fearth", "debate"}
 
-# O Guy continua usando seu histórico/RAG original em Guy.py.
+# O histórico global do chat é independente das sessões estruturadas de Debate.
 historicos_fearth = {}
-historicos_debate = {}
-
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 RESOURCES_DIR = PROJECT_DIR / "resources"
 
@@ -73,6 +78,40 @@ criar_banco_memoria()
 criar_banco_perfil()
 
 
+def _cliente_llm_debate(modelo, mensagens):
+    agente = "fearth" if "fearth" in modelo.lower() else "guy"
+    resposta = ollama.chat(
+        model=modelo,
+        messages=mensagens,
+        options=opcoes_modelo(agente),
+    )
+    conteudo = resposta.get("message", {}).get("content", "").strip()
+    if not conteudo:
+        raise RuntimeError("O Ollama não retornou conteúdo para o debate.")
+    return conteudo
+
+
+def _pesquisar_fontes_debate(consulta, limite, timeout):
+    if GuyModule.DDGS is None:
+        raise RuntimeError("A biblioteca ddgs não está instalada.")
+    with GuyModule.DDGS(timeout=timeout) as ddgs:
+        resultados = ddgs.text(
+            consulta,
+            region="br-pt",
+            safesearch="moderate",
+            max_results=limite,
+        )
+        return [dict(resultado) for resultado in resultados]
+
+
+DEBATE_PESQUISA_DISPONIVEL = GuyModule.DDGS is not None
+debate_service = DebateService(
+    llm_client=_cliente_llm_debate,
+    searcher=_pesquisar_fontes_debate if DEBATE_PESQUISA_DISPONIVEL else None,
+    pesquisa_disponivel=DEBATE_PESQUISA_DISPONIVEL,
+)
+
+
 def contexto_usuario(usuario):
     """Retorna as preferências e o contexto técnico que valem nesta resposta."""
     perfil = obter_perfil(usuario["username"])
@@ -91,68 +130,46 @@ def resposta_ollama(modelo, mensagens, temperatura=None, agente="guy"):
     return conteudo
 
 
-def responder_fearth(usuario, mensagem, temperatura=None):
+def responder_fearth(
+    usuario,
+    mensagem,
+    temperatura=None,
+    contexto_habilitado=True,
+):
     username = usuario["username"]
     historico = historicos_fearth.setdefault(username, [])
-    perfil, contexto_perfil = contexto_usuario(usuario)
+    perfil = obter_perfil(username)
+    contexto_perfil = (
+        construir_contexto_perfil(username) if contexto_habilitado else ""
+    )
+    memoria = construir_contexto_memoria(username)
+    montagem = montar_prompt_contexto(
+        mensagem,
+        historico,
+        memoria,
+        modo=contexto_habilitado,
+        contexto_adicional={
+            "PERFIL TÉCNICO DO USUÁRIO": contexto_perfil,
+        },
+    )
+    registrar_decisao_contexto(app.logger, montagem, "fearth")
     sistema = {
         "role": "system",
         "content": (
             "Você é Fearth, uma agente independente, analítica e respeitosa. "
             "Não concorde automaticamente: aponte premissas frágeis, riscos e "
-            "alternativas quando fizer sentido.\n\n"
+            "alternativas quando fizer sentido. Responda à mensagem atual "
+            "delimitada; o contexto auxiliar pode não se aplicar.\n\n"
             f"{instrucao_preferencias(perfil['preferencias'])}\n\n"
-            f"PERFIL TÉCNICO DO USUÁRIO\n{contexto_perfil}"
         ),
     }
-    mensagens = [sistema, *historico[-12:], {"role": "user", "content": mensagem}]
+    mensagens = [sistema, {"role": "user", "content": montagem["prompt"]}]
     resposta = resposta_ollama(MODELO_FEARTH, mensagens, temperatura=temperatura, agente="fearth")
     historico.extend([
         {"role": "user", "content": mensagem},
         {"role": "assistant", "content": resposta},
     ])
     return resposta
-
-
-def responder_debate(usuario, pergunta, temperatura=None):
-    username = usuario["username"]
-    historico = historicos_debate.setdefault(username, [])
-    contexto = "\n\n".join(historico[-6:])
-    base = f"Pergunta do usuário: {pergunta}"
-    if contexto:
-        base = f"Contexto de debates anteriores:\n{contexto}\n\n{base}"
-    perfil, contexto_perfil = contexto_usuario(usuario)
-    preferencias = instrucao_preferencias(perfil["preferencias"])
-    contexto_compartilhado = f"{preferencias}\n\nPERFIL TÉCNICO DO USUÁRIO\n{contexto_perfil}"
-
-    guy = resposta_ollama(MODELO_GUY, [
-        {
-            "role": "system",
-            "content": "Você é Guy. Apresente uma posição inicial útil, objetiva e bem justificada.\n\n" + contexto_compartilhado,
-        },
-        {"role": "user", "content": base},
-    ], temperatura=temperatura, agente="guy")
-    fearth = resposta_ollama(MODELO_FEARTH, [
-        {
-            "role": "system",
-            "content": "Você é Fearth, debatedora independente. Analise a pergunta e a posição de Guy. Conteste somente onde houver motivo e ofereça correções práticas.\n\n" + contexto_compartilhado,
-        },
-        {"role": "user", "content": f"{base}\n\nPosição inicial de Guy:\n{guy}"},
-    ], temperatura=temperatura, agente="fearth")
-    conclusao = resposta_ollama(MODELO_GUY, [
-        {
-            "role": "system",
-            "content": "Você é o mediador final de um debate. Produza uma conclusão equilibrada, curta e acionável; reconheça incertezas e diga qual escolha faz mais sentido nas condições dadas.\n\n" + contexto_compartilhado,
-        },
-        {"role": "user", "content": f"Pergunta: {pergunta}\n\nGuy:\n{guy}\n\nFearth:\n{fearth}"},
-    ], temperatura=temperatura, agente="guy")
-    historico.extend([
-        f"Usuário: {pergunta}",
-        f"Guy: {guy}",
-        f"Fearth: {fearth}",
-        f"Conclusão: {conclusao}",
-    ])
-    return {"modo": "debate", "guy": guy, "fearth": fearth, "conclusao": conclusao}
 
 
 @app.route("/")
@@ -171,6 +188,19 @@ def chat():
     agente = str(dados.get("agente", "guy")).lower().strip()
     temperatura = dados.get("temperatura")
     temperatura = normalizar_temperatura(temperatura, 0.2)
+    contexto_habilitado = obter_perfil(USUARIO["username"])["preferencias"].get(
+        "contexto_habilitado",
+        True,
+    )
+    if not isinstance(contexto_habilitado, bool):
+        app.logger.error("A preferência contexto_habilitado não é booleana.")
+        return jsonify({
+            "detail": "A preferência de contexto está inválida. Atualize-a em Perfil e preferências."
+        }), 500
+    if "contexto_habilitado" in dados:
+        if not isinstance(dados["contexto_habilitado"], bool):
+            return jsonify({"detail": "O modo de contexto precisa ser booleano."}), 400
+        contexto_habilitado = dados["contexto_habilitado"]
     if not mensagem:
         return jsonify({"detail": "A mensagem não pode estar vazia."}), 400
     if agente not in AGENTES_VALIDOS:
@@ -178,18 +208,33 @@ def chat():
 
     try:
         if agente == "debate":
-            return jsonify(responder_debate(USUARIO, mensagem, temperatura=temperatura))
+            return jsonify({
+                "detail": (
+                    "O modo Debate agora usa sessões estruturadas. "
+                    "Abra a opção Debate estruturado."
+                )
+            }), 409
         if agente == "fearth":
             return jsonify({
                 "modo": "simples",
                 "agente": "fearth",
-                "resposta": responder_fearth(USUARIO, mensagem, temperatura=temperatura),
+                "resposta": responder_fearth(
+                    USUARIO,
+                    mensagem,
+                    temperatura=temperatura,
+                    contexto_habilitado=contexto_habilitado,
+                ),
             })
 
         return jsonify({
             "modo": "simples",
             "agente": "guy",
-            "resposta": processar_mensagem(USUARIO, mensagem, temperatura=temperatura),
+            "resposta": processar_mensagem(
+                USUARIO,
+                mensagem,
+                temperatura=temperatura,
+                contexto_habilitado=contexto_habilitado,
+            ),
         })
     except Exception as erro:
         app.logger.exception("Erro no chat: %s", erro)
@@ -201,8 +246,74 @@ def nova_conversa():
     username = USUARIO["username"]
     historicos[username] = []
     historicos_fearth.pop(username, None)
-    historicos_debate.pop(username, None)
     return jsonify({"sucesso": True})
+
+
+@app.route("/debate")
+def debate():
+    return render_template("debate.html")
+
+
+@app.route("/api/debate", methods=["GET"])
+def api_estado_debate():
+    return jsonify({
+        "sessao_ativa": debate_service.active(),
+        "sessoes": debate_service.list_sessions(),
+        "configuracao": CONFIGURACAO_DEBATE,
+        "pesquisa_disponivel": DEBATE_PESQUISA_DISPONIVEL,
+        "interrupcao_disponivel": False,
+    })
+
+
+@app.route("/api/debate", methods=["POST"])
+def api_iniciar_debate():
+    dados = request.get_json(silent=True)
+    if not isinstance(dados, dict):
+        return jsonify({"detail": "JSON inválido."}), 400
+    try:
+        sessao = debate_service.create(
+            dados,
+            idempotency_key=request.headers.get("Idempotency-Key"),
+        )
+    except DebateError as erro:
+        return jsonify({"detail": str(erro)}), 400
+    except Exception as erro:
+        app.logger.exception("Não foi possível iniciar a sessão de debate: %s", erro)
+        return jsonify({
+            "detail": "Não foi possível salvar/iniciar a sessão de debate."
+        }), 500
+    return jsonify(sessao), 201
+
+
+@app.route("/api/debate/<session_id>", methods=["GET"])
+def api_obter_debate(session_id):
+    try:
+        return jsonify(debate_service.get(session_id))
+    except DebateError as erro:
+        return jsonify({"detail": str(erro)}), 404
+
+
+@app.route("/api/debate/<session_id>/<acao>", methods=["POST"])
+def api_comando_debate(session_id, acao):
+    operacoes = {
+        "pausar": debate_service.pause,
+        "continuar": debate_service.resume,
+        "interromper": debate_service.interrupt,
+        "encerrar": debate_service.end_early,
+        "cancelar": debate_service.cancel,
+        "tentar-novamente": debate_service.resume,
+        "tentar-resumo": debate_service.retry_summary,
+    }
+    operacao = operacoes.get(acao)
+    if operacao is None:
+        return jsonify({"detail": "Comando de debate desconhecido."}), 404
+    try:
+        return jsonify(operacao(session_id))
+    except DebateError as erro:
+        return jsonify({"detail": str(erro)}), 409
+    except Exception as erro:
+        app.logger.exception("Comando %s falhou na sessão %s: %s", acao, session_id, erro)
+        return jsonify({"detail": "Não foi possível executar o comando de debate."}), 500
 
 
 @app.route("/api/voz/transcrever", methods=["POST"])
